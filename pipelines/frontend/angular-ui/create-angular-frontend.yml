@@ -1,0 +1,131 @@
+trigger: none
+pr: none
+
+resources:
+  repositories:
+  - repository: eycomply-dlq-processor-ui
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eycomply-dlq-processor-ui
+    ref: '$(BRANCH_REF)'
+  # - repository: eycomply-tracker-ui
+  #   type: github
+  #   endpoint: emu-service-connection
+  #   name: ey-org/eycomply-tracker-ui
+  #   ref: '$(BRANCH_REF)'
+  # - repository: eycomply-audit-trial-ui
+  #   type: github
+  #   endpoint: emu-service-connection
+  #   name: ey-org/eycomply-audit-trial-ui
+  #   ref: '$(BRANCH_REF)'
+  - repository: eyc-cm-nonprod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-nonprod
+  - repository: eyc-cm-prod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-prod
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - qa36
+  - qa37
+  - qabcm
+  - perftest
+  - uat
+  - prod
+  - prod-dr
+
+- name: microservice
+  displayName: "Microservice"
+  type: string
+  default: dlqprocessorui
+  values:
+  - dlqprocessorui
+#  - trackerui
+#  - auditui
+
+- name: branch
+  displayName: "Branch"
+  type: string
+  default: develop
+
+- name: apply_configmap
+  displayName: "Deploy Configmap?"
+  type: boolean
+  default: false
+
+#Global variables
+variables:
+  DOCKER_BUILDKIT: 1
+  DOCKER_PORT: "8080"
+  DOCKER_REGISTRY: "eyctpeu-eycomply-docker-dev-eu.jfrog.io"
+  DOCKER_REPO: "eycomply-docker-dev-eu"
+  DOCKER_IMAGE_PATH: "$(DOCKER_REGISTRY)/ui/other/${{ parameters.microservice }}:$(BUILD_VAR)"
+  ${{ if eq(parameters.environment, 'prod-dr') }}:
+    PORTAL: 'prod'
+  ${{ else }}:
+    PORTAL: "${{ parameters.environment }}"
+  MICROSVC: "${{ parameters.microservice }}service"
+  BUILD_VAR: "$(Build.BuildNumber)"
+  INGRESS_REWRITE: "$(${{ parameters.microservice }}-ingress-rewrite)"
+  PROXY_TIMEOUT: "1800"
+  AKS_LB: "$(${{ parameters.environment }}-load-balancer)"
+  AZURE_SUB: "EYC-Non-Prod-Subscription" #For Docker tasks
+  ACR_LOGIN: '{"loginServer":"eycomplynonprod.azurecr.io", "id" : "/subscriptions/0c18f943-558e-4c40-9841-5d3346a32072/resourceGroups/USEDEYCEYCRSG01/providers/Microsoft.ContainerRegistry/registries/eycomplynonprod"}'
+  PROXY_BODY_SIZE: "2560m"
+  API_URL_KEY: 'API_URL'
+  API_TOKEN_KEY: 'API_TOKEN'
+  BRANCH_REF: '${{ parameters.branch }}'
+  ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    CONFIGMAPREPONAME: "eyc-cm-nonprod"
+  ${{ else }}:
+    CONFIGMAPREPONAME: "eyc-cm-prod"
+
+stages:
+- stage: Build
+  jobs:
+  - template: templates/build-angular-ui.yml
+    parameters:
+      environment: "$(PORTAL)"
+      microservice: "${{ parameters.microservice }}"
+      branch: "${{ parameters.branch }}"
+
+- ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+  - stage: DeployQA
+    dependsOn: Build
+    variables:
+    - template: ../../../variables/load-balancers.yml
+    - template: ../../../variables/ingress-rewrites.yml
+    jobs:
+    - template: templates/deploy-angular-ui.yml
+      parameters:
+        environment: "${{ parameters.environment }}"
+        microservice: "${{ parameters.microservice }}"
+        configmap: "${{ parameters.apply_configmap }}"
+        branch: "${{ parameters.branch }}"
+        adoEnv: "eycomply"
+
+- ${{ else }}:
+  - stage: DeployUATandPROD
+    dependsOn: Build
+    variables:
+    - template: ../../../variables/load-balancers.yml
+    - template: ../../../variables/ingress-rewrites.yml
+    jobs:
+    - template: templates/deploy-angular-ui.yml
+      parameters:
+        environment: "${{ parameters.environment }}"
+        microservice: "${{ parameters.microservice }}"
+        configmap: "${{ parameters.apply_configmap }}"
+        branch: "${{ parameters.branch }}"
+        adoEnv: "${{ parameters.environment }}"

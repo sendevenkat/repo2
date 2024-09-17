@@ -1,0 +1,149 @@
+parameters:
+- name: environment
+  type: string
+- name: branch
+  type: string
+- name: adoEnv
+  type: string
+- name: configmap
+  type: boolean
+- name: microservice
+  type: string
+
+jobs:
+- deployment: Deploy
+  environment: "EY Comply.${{ parameters.adoEnv }}"
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        - task: DownloadPipelineArtifact@2
+          inputs:
+            artifact: 'artifact'
+
+        - script: |
+            #INGRESS_PATH='$(PORTAL)(/|$)($(tenant-ingress-pattern))?(/|$)?($(MICROSVC))(/|$)?(.*)'
+            INGRESS_PATH='/($(tenant-ingress-pattern)|$(PORTAL))?/?($(tenant-ingress-pattern)|$(PORTAL)|admin)(/|$)($(MICROSVC))(/|$)?(.*)'
+            echo '##vso[task.setvariable variable=INGRESS_PATH]'$INGRESS_PATH''
+          displayName: 'Set INGRESS_PATH variable'
+          condition: and(succeeded(), ne('${{ parameters.environment }}', 'qabcm'))
+
+        - script: |
+            #INGRESS_PATH='bcmdemo|$(PORTAL)(/|$)($(tenant-ingress-pattern)|bcmdemo)?(/|$)?($(MICROSVC))(/|$)?(.*)'
+            INGRESS_PATH='/($(tenant-ingress-pattern)|bcmdemo|$(PORTAL))?/?($(tenant-ingress-pattern)|bcmdemo|$(PORTAL)|admin)(/|$)($(MICROSVC))(/|$)?(.*)'
+            echo '##vso[task.setvariable variable=INGRESS_PATH]'$INGRESS_PATH''
+          displayName: 'Set INGRESS_PATH variable'
+          condition: and(succeeded(), eq('${{ parameters.environment }}', 'qabcm'))
+
+        - script: |
+            echo "##vso[task.setvariable variable=MEMORY_REQUEST]"1Gi""
+            echo "##vso[task.setvariable variable=MEMORY_LIMIT]"11Gi""
+            echo "##vso[task.setvariable variable=CPU_REQUEST]"100m""
+            echo "##vso[task.setvariable variable=CPU_LIMIT]"5000m""
+            echo "##vso[task.setvariable variable=MAX_REPLICAS]"10""
+            echo "##vso[task.setvariable variable=MIN_REPLICAS]"1""
+            echo "##vso[task.setvariable variable=MEMORY_AUTOSCALE]"3Gi""
+          displayName: 'Set manifests variables'
+
+        - script: |
+            AKS_LB_PARSED=$(echo "$(AKS_LB)" | tr '[A-Z]' '[a-z]')
+            echo "##vso[task.setvariable variable=AKS_LB_PARSED]$AKS_LB_PARSED"
+          displayName: 'Set AKS load balancer variable'
+
+        - script: |
+            cd $(Build.SourcesDirectory)
+
+            echo "Replacing variables in manifest files..."
+
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{DOCKER_IMAGE_PATH}}|$(DOCKER_IMAGE_PATH)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{BUILD_VAR}}|$(BUILD_VAR)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s#{{INGRESS_REWRITE}}#$(INGRESS_REWRITE)#g" ./kubernetes/03-ingress-object.yml
+            sed -i "s#{{INGRESS_PATH}}#$(INGRESS_PATH)#g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PROXY_TIMEOUT}}|$(PROXY_TIMEOUT)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{AKS_LB}}|$(AKS_LB_PARSED)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PROXY_BODY_SIZE}}|$(PROXY_BODY_SIZE)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{MEMORY_REQUEST}}|$(MEMORY_REQUEST)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MEMORY_LIMIT}}|$(MEMORY_LIMIT)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{CPU_REQUEST}}|$(CPU_REQUEST)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MIN_REPLICAS}}|$(MIN_REPLICAS)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MAX_REPLICAS}}|$(MAX_REPLICAS)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MEMORY_AUTOSCALE}}|$(MEMORY_AUTOSCALE)|g" ./kubernetes/04-hpa.yml
+
+            cat ./kubernetes/01-deployment.yml
+            cat ./kubernetes/02-service.yml
+            cat ./kubernetes/03-ingress-object.yml
+            cat ./kubernetes/04-hpa.yml
+          displayName: 'Replace values in manifest files'
+
+        - task: TriggerBuild@3
+          displayName: 'Deploy Configmap'
+          inputs:
+            definitionIsInCurrentTeamProject: true
+            buildDefinition: 'EYC2-Deploy-ConfigMap'
+            queueBuildForUserThatTriggeredBuild: true
+            ignoreSslCertificateErrors: false
+            useSameSourceVersion: false
+            useCustomSourceVersion: false
+            useSameBranch: true
+            waitForQueuedBuildsToFinish: true
+            storeInEnvironmentVariable: false
+            templateParameters: "environment: ${{ parameters.environment }}, microservice: ${{ parameters.microservice }}"
+            authenticationMethod: 'OAuth Token'
+            password: '$(System.AccessToken)'
+            enableBuildInQueueCondition: false
+            dependentOnSuccessfulBuildCondition: false
+            dependentOnFailedBuildCondition: false
+            checkbuildsoncurrentbranch: false
+            failTaskIfConditionsAreNotFulfilled: false
+          enabled: ${{ parameters.configmap }}
+
+        - task: Kubernetes@1
+          displayName: 'Deploy microservice'
+          inputs:
+            command: 'apply'
+            namespace: '${{ parameters.adoEnv }}'
+            arguments: '-f kubernetes/01-deployment.yml -f kubernetes/02-service.yml -f kubernetes/03-ingress-object.yml -f kubernetes/04-hpa.yml'
+            output: 'yaml'
+
+        - script: |
+            az pipelines runs tag add --run-id $(Build.BuildId) --tag "Environment: $(PORTAL), Service: $(MICROSVC), Branch: ${{ parameters.branch }}, Queued By: $(Build.QueuedBy)" --org https://dev.azure.com/fso-to/ --project "FSO-Project Fusion"
+          displayName: 'Tag pipeline run'
+          env:
+            AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+          condition: succeededOrFailed()
+
+        - script: |
+            echo PORTAL is $(PORTAL)
+            echo MICROSVC is $(MICROSVC)
+            echo BUILD_VAR is $(BUILD_VAR)
+            echo DOCKER_PORT is $(DOCKER_PORT)
+            echo INGRESS_REWRITE is '$(INGRESS_REWRITE)'
+            echo INGRESS_PATH is '$(INGRESS_PATH)'
+            echo PROXY_TIMEOUT is $(PROXY_TIMEOUT)
+            echo PROXY_BODY_SIZE is $(PROXY_BODY_SIZE)
+            echo AKS_LB is $(AKS_LB)
+            echo MEMORY_REQUEST is $(MEMORY_REQUEST)
+            echo MEMORY_LIMIT is $(MEMORY_LIMIT)
+            echo CPU_REQUEST is $(CPU_REQUEST)
+            echo CPU_LIMIT is $(CPU_LIMIT)
+            echo MAX_REPLICAS is $(MAX_REPLICAS)
+            echo MIN_REPLICAS is $(MIN_REPLICAS)
+          displayName: 'Display variables'
+          condition: succeededOrFailed()
+
+        - template: ../../../backend/templates/upload-release-notes.yml
+          parameters:
+            environment: "${{ parameters.environment }}"
+            microservice: "${{ parameters.microservice }}"

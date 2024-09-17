@@ -1,0 +1,62 @@
+trigger: none
+pr: none
+pool:
+  vmImage: 'ubuntu-latest'
+
+
+parameters:
+  - name: cosmosdb
+    displayName: "CosmosDB Accounts"
+    type: string
+    default: usedeyc003cdb01
+    values:
+    - usedeyc003cdb01
+    - usedeyc003cdb02
+    - usedeyc003rdc09
+    - usepeyc002cdb01
+    - usepeyc002cdb06
+    - useueyc002cdb02
+    - useueyc002cdb03
+
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: qa33
+    values:
+    - qa33
+    - qa36
+    - qa37
+    - qabcm
+    - perftest
+    - uat
+    - prod
+
+  - name: ipaddress
+    displayName: IPAddress
+    type: string
+    default: 0.0.0.0
+
+variables: 
+- template: ../../../variables/subscriptions.yml
+- template: ../../../variables/resource-groups.yml
+
+
+steps:
+- task: AzureCLI@2
+  displayName: 'Azure CLI '
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      ListOfIPs=$(az cosmosdb show \
+        --name ${{ parameters.cosmosdb }} \
+        --resource-group $(${{ parameters.environment }}-rg) \
+            | jq -r '.ipRules[].ipAddressOrRange' | paste -sd "," -)
+
+      az cosmosdb update \
+        --name ${{ parameters.cosmosdb }} \
+        --resource-group $(${{ parameters.environment }}-rg) \
+        --ip-range-filter $ListOfIPs,${{ parameters.ipaddress }}
+    addSpnToEnvironment: true
+    useGlobalConfig: true

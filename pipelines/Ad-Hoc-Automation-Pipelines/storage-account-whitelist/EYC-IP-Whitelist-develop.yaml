@@ -1,0 +1,23 @@
+variables: 
+  RESOURCEGROUP: 'USEDEYCEYCRSG01'
+pool:
+  name: Azure Pipelines
+  vmImage: 'ubuntu-latest'
+parameters:
+  - name: STGACCOUNT
+    displayName: "Storage Account"
+    type: string
+    default: usedeyctfastg01
+    values:
+    - usedeyctfastg01
+steps:
+- task: AzureCLI@2
+  displayName: 'Azure CLI '
+  inputs:
+    azureSubscription: 'EYC-Non-Prod-Subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     az storage account network-rule add -g $(RESOURCEGROUP) -n ${{ parameters.STGACCOUNT }} --ip-address "165.225.124.95"
+    addSpnToEnvironment: true
+    useGlobalConfig: true

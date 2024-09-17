@@ -1,0 +1,97 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: uat
+  values:
+  - uat
+  - qa33
+ 
+
+- name: branch_artifact_selector
+  displayName: Deploy
+  type: string
+  default: branch
+  values:
+  - branch
+  - artifact
+
+- name: branch_artifact_value
+  displayName: Branch or artifact name
+  type: string
+  default: 'feature-update/angular-update-15'
+
+variables:
+# Global variables
+- template: ../../variables/environment-global.yml
+  parameters:
+    environment: "${{ parameters.environment }}"
+    microservice: "uistaging"
+
+# Environment-specific variables
+- ${{ if eq(parameters.environment, 'prod') }}: 
+  - template: ../../variables/environment-prod.yml
+    parameters:
+      microservice: "uistaging"
+- ${{ elseif eq(parameters.environment, 'prod-dr') }}: 
+  - template: ../../variables/environment-prod-dr.yml
+    parameters:
+      microservice: "uistaging"
+- ${{ elseif eq(parameters.environment, 'uat') }}:
+  - template: ../../variables/environment-uat.yml
+    parameters:
+      microservice: "uistaging"
+- ${{ elseif eq(parameters.environment, 'qabcm') }}: 
+  - template: ../../variables/environment-qabcm.yml
+    parameters:
+      microservice: "uistaging"
+- ${{ else }}:
+  - template: ../../variables/environment-dev.yml
+    parameters:
+      microservice: "uistaging"
+
+# Frontend-specific variables
+- name: MICROSVC
+  value: "uistaging"
+- name: INGRESS_REWRITE
+  value: "/staging"
+- name: PROXY_TIMEOUT
+  value: "1800"
+- name: PROXY_BODY_SIZE
+  value: "2560m"
+- name: CATALINA_HOME
+  value: "/opt/tomcat/tomcat_staging"
+
+stages:
+- stage: Build${{ upper(variables.ENV_CLASS) }}
+  jobs:
+  - template: templates/build-ui.yml
+    parameters:
+      environment: "${{ parameters.environment }}"
+      branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+      branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+      version: "$(VERSION)"
+      envClass: "$(ENV_CLASS)"
+
+- stage: Deploy${{ upper(variables.ENV_CLASS) }}
+  dependsOn: Build${{ upper(variables.ENV_CLASS) }}
+  variables:
+  - template: ../../variables/load-balancers.yml
+  - template: ../../variables/ingress-rewrites.yml
+  jobs:
+  - template: templates/deploy-ui.yml
+    parameters:
+      environment: "${{ parameters.environment }}"
+      branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+      branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+      version: "$(VERSION)"
+      adoEnv: $(ADO_ENV)
+

@@ -1,0 +1,150 @@
+steps:
+- script: |
+    echo "##vso[task.setvariable variable=GRADLEW_FILE]$(find $(Build.SourcesDirectory)/../service-repository -type f -name gradlew |head -1)"
+  displayName: 'Discover Gradle Wrapper location'
+
+- script: |
+    echo "##vso[task.setvariable variable=BUILD_DIRECTORY]$(Build.SourcesDirectory)/../service-repository"
+    echo "##vso[task.setvariable variable=GRADLE_BUILD_COMMAND]buildDEMO"  
+    echo "##vso[task.setvariable variable=GRADLEW_DIRECTORY]$(dirname $(GRADLEW_FILE))"    
+    echo "##vso[task.setvariable variable=ARTIFACT_VERSION_POSTFIX]$(Build.BuildNumber)"
+    #echo "##vso[task.setvariable variable=AGENT_IP]$(host myip.opendns.com resolver1.opendns.com | grep 'has address' |awk '{ print $NF }')"      
+  displayName: 'Set build variables'
+
+- script: |
+    cd $(build.artifactstagingdirectory)
+    echo '------------------------CODE DETAILS-----------------------------' >> build.var
+    echo 'Repository name is: '$(Build.Repository.Name)
+    echo 'Repository is on: '$(Build.Repository.Provider) |tee -a build.var
+    echo 'Repository URL is: '$(Build.Repository.Uri) |tee -a build.var
+    echo 'Source branch is: '$(Build.SourceBranch)
+    echo 'Source branch name is: '$(Build.SourceBranchName) |tee -a build.var
+    echo 'Commit is: '$(Build.SourceVersion) |tee -a build.var
+    echo Queued by '$(Build.QueuedBy)'
+    echo Build.SourcesDirectory is $(Build.SourcesDirectory)
+    echo BUILD_DIRECTORY is '$(BUILD_DIRECTORY)'
+    echo GRADLEW_DIRECTORY is '$(GRADLEW_DIRECTORY)'
+    echo GRADLEW_FILE is '$(GRADLEW_FILE)'
+    echo GRADLE_BUILD_COMMAND is '$(GRADLE_BUILD_COMMAND)'
+    echo Pipeline name is '$(Build.DefinitionName)'
+    echo Pipeline.Workspace is $(Pipeline.Workspace)
+    #echo AGENT_IP is $(AGENT_IP)
+    echo 'BuildId: '$(Build.BuildId)
+    echo 'Build.BuildNumber: '$(Build.BuildNumber)   
+  displayName: 'Display and save variables'
+
+- task: NodeTool@0
+  inputs:
+    versionSpec: '16.20.2'
+  displayName: 'Install Node.js'
+
+- task: npmAuthenticate@0
+  inputs:
+    workingFile: '$(GRADLEW_DIRECTORY)/.npmrc'
+    customEndpoint: 'EYC jFrog Artifactory - Motif'
+  displayName: 'Authenticate with Jfrog registry'
+
+- task: Npm@1
+  displayName: 'npm install'
+  inputs:
+    command: 'custom'
+    customCommand: 'install --legacy-peer-deps'
+    workingDir: '$(BUILD_DIRECTORY)'
+  enabled: true
+
+- script: |
+    export NODE_OPTIONS="--max-old-space-size=6500"
+  displayName: 'Set memory limit for Node'
+  enabled: true
+
+- script: |
+    chmod +x $(GRADLEW_FILE)
+  displayName: 'Gradle: make gradlew executable' # to avoid warnings in pipleines
+  enabled: true
+
+- task: Gradle@3
+  displayName: 'Gradle: build'
+  inputs:
+    gradleWrapperFile: '$(GRADLEW_FILE)'
+    workingDirectory: '$(GRADLEW_DIRECTORY)'
+    tasks: '$(GRADLE_BUILD_COMMAND)'
+    publishJUnitResults: false
+  enabled: true
+
+- task: CmdLine@2
+  displayName: Download and run Whitesource Unified Agent
+  inputs:
+    script: |
+      cd $(GRADLEW_DIRECTORY)
+      echo "vstsMavenAccessToken=$vstsMavenAccessToken" >> gradle.properties
+      cd $(BUILD_DIRECTORY)
+      curl -LJO https://github.com/whitesource/unified-agent-distribution/releases/latest/download/wss-unified-agent.jar
+      java -jar wss-unified-agent.jar -c wss-unified-agent.config -apikey $(api_key) -userkey $(user_key)
+  enabled: false # Disabled for development
+  
+- task: whitesource.WhiteSource-azure-devops-services.bolt.wss.WhiteSource@21
+  inputs:
+    cwd: '$(BUILD_DIRECTORY)'
+    scanReportTimeout: '3'
+  enabled: false
+
+- task: CmdLine@2
+  displayName: 'Override source directory for Checkmarx [1/2]'
+  inputs:
+    script: |
+      cd $(Pipeline.Workspace)
+      mv s stemp
+      mv service-repository s
+  condition: and(succeeded(), notin(variables['Build.Reason'], 'PullRequest'))
+  enabled: false
+
+- task: checkmarx.cxsast.cx-scan-task.Application security testing@2022
+  displayName: 'Checkmarx security testing'
+  inputs:
+    projectName: 'EyComply_FrontEnd'
+    CheckmarxService: 'EYC-Checkmarx'
+    preset: 'EY-Recommended'
+    incScan: false
+    enableProxy: false
+    enableSastScan: true
+    enableDependencyScan: false
+    syncMode: false
+    overrideProjectSettings: false
+    avoidDuplicateScans: true
+    folderExclusion: '_cvs, .svn, _svn, .hg, .git, .bzr, .gitgnore, .gradle, .checkstyle, .classpath, bin, obj, backup, .idea, node_modules, .github, .mvn, .nuget, .nyc_output, .python_packages, .settings, .templates, .vs, .vscode, @angular, @angular-devkit, *bootstrap*, __mock__, __mocks__, __tests__, _deploysql, _examples, _generated, _pytest, _test_, _vendor, _vendored_packages, 05.testdata, 16.5_enabler react to webapi - uploaded files, 4qcx5vp2a0pbczjic2tlvs3qj, 99.examples, build, build-cache-1, builder, *tests, dashboard-deployment*, debug, deploy, deployment*, deploy-templates, dist, dists, docs, doctemplates, e2e, entityframework.*, *test, gradle-*, *jquery*, maven*, microsoft.*, mock, mockdata, mocks, modernizr.*, mstest.*, project-cache, react, sampledata, samples, software-deploy*, swagger*, system.diagnostics*, target, testatominstance, unit-test-data, unittestprojectcosmos, unity, unity.*, net35-unity.*, vendor, vendor-details, vendorfilter, wixsharp.*, z.entityframework.*, avscan, angular, *testing*, packages*, Checkmarx/Reports'
+    fileExtension: '!**/_cvs/**/*, !**/.svn/**/*, !**/.hg/**/*, !**/.git/**/*, !**/.bzr/**/*, !**/.gitgnore/**/*, !**/.gradle/**/*, !**/.checkstyle/**/*, !**/.classpath/**/*, !**/bin/**/*, !**/obj/**/*, !**/backup/**/*, !**/.idea/**/*, !**/*.DS_Store, !**/*.ipr, !**/*.iws, !**/*.bak, !**/*.tmp, !**/*.aac, !**/*.aif, !**/*.iff, !**/*.m3u, !**/*.mid, !**/*.mp3, !**/*.mpa, !**/*.ra, !**/*.wav, !**/*.wma, !**/*.3g2, !**/*.3gp, !**/*.asf, !**/*.asx, !**/*.avi, !**/*.flv, !**/*.mov, !**/*.mp4, !**/*.mpg, !**/*.rm, !**/*.swf, !**/*.vob, !**/*.wmv, !**/*.bmp, !**/*.gif, !**/*.jpg, !**/*.png, !**/*.psd, !**/*.tif, !**/*.swf, !**/*.jar, !**/*.zip, !**/*.rar, !**/*.exe, !**/*.dll, !**/*.pdb, !**/*.7z, !**/*.gz, !**/*.tar.gz, !**/*.tar, !**/*.gz, !**/*.ahtm, !**/*.ahtml, !**/*.fhtml, !**/*.hdm, !**/*.hdml, !**/*.hsql, !**/*.ht, !**/*.hta, !**/*.htc, !**/*.htd, !**/*.war, !**/*.ear, !**/*.htmls, !**/*.ihtml, !**/*.mht, !**/*.mhtm, !**/*.mhtml, !**/*.ssi, !**/*.stm, !**/*.bin,!**/*.lock,!**/*.svg,!**/*.obj, !**/*.stml, !**/*.ttml, !**/*.txn, !**/*.xhtm, !**/*.xhtml, !**/*.class, !**/*.iml, !Checkmarx/Reports/*.*, !OSADependencies.json, !**/node_modules/**/*, !**/*.dll, !**/*.config, !**/*.gradle, !**/*.jar, !**/*.json, !**/*.properties, !**/*.xml, !**/.github/**/*, !**/.mvn/**/*, !**/.nuget, !**/.nyc_output, !**/.python_packages, !**/.settings, !**/.templates, !**/.vs, !**/.vscode, !**/@angular, !**/@angular-devkit, !**/*bootstrap*, !**/__mock__, !**/__mocks__, !**/__tests__, !**/_deploysql, !**/_examples, !**/_generated, !**/_pytest, !**/_test_, !**/_vendor, !**/_vendored_packages, !**/05.testdata, !**/16.5_enabler react to webapi - uploaded files, !**/4qcx5vp2a0pbczjic2tlvs3qj, !**/99.examples, !**/bin !**/build, !**/build-cache-1, !**/builder, !**/*tests, !**/dashboard-deployment*, !**/debug, !**/deploy, !**/deployment*, !**/deploy-templates, !**/dist, !**/dists, !**/docs, !**/doctemplates, !**/e2e, !**/entityframework.*, !**/*test, !**/gradle-*, !**/*jquery*, !**/maven*, !**/microsoft.*, !**/mock, !**/mockdata, !**/mocks, !**/modernizr.*, !**/mstest.*, !**/node_modules, !**/project-cache, !**/react, !**/sampledata, !**/samples, !**/software-deploy*, !**/swagger*, !**/system.diagnostics*, !**/target, !**/testatominstance, !**/unit-test-data, !**/unittestprojectcosmos, !**/unity, !**/unity.*, !**/net35-unity.*, !**/vendor, !**/vendor-details, !**/vendorfilter, !**/wixsharp.*, !**/z.entityframework.*, !**/avscan, !**/node_modules/**/*, !**/angular/**/*, !**/*testing*, !**/packages* '
+  condition: and(succeeded(), notin(variables['Build.Reason'], 'PullRequest'))
+  enabled: false
+
+- task: CmdLine@2
+  displayName: 'Override source directory for Checkmarx, rollback [2/2]'
+  inputs:
+    script: |
+      cd $(Pipeline.Workspace)
+      mv s service-repository
+      mv stemp s
+  condition: and(succeeded(), notin(variables['Build.Reason'], 'PullRequest'))
+  enabled: false
+
+- ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - script: |
+        cd $(BUILD_DIRECTORY)/dist/
+        cp $(build.artifactstagingdirectory)/build.var .
+        zip -r ui.zip ./*
+      displayName: 'Make ZIP archive'
+    - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-generic-upload.ArtifactoryGenericUpload@2
+      displayName: 'Gradle: upload artifact to jFrog Artifactory'
+      inputs:
+        artifactoryService: 'EYC jFrog Artifactory - Gradle'
+        fileSpec: |
+          {
+            "files": [
+              {
+                "pattern": "$(BUILD_DIRECTORY)/dist/ui.zip",
+                "target": "eycomply-gradle-dev-eu/uistaging/uistaging-$(ARTIFACT_VERSION_POSTFIX).zip"
+              }
+            ]
+          }
+        collectBuildInfo: true
+        module: 'eycomplywebportal-buildinfo'
+        insecureTls: true

@@ -1,0 +1,18 @@
+FROM openzipkin/zipkin:2
+
+USER root
+
+RUN sed -e '/edge/ s/^#*/#/' -i /etc/apk/repositories
+
+RUN apk update && \
+    apk upgrade --available
+
+RUN apk add curl iputils gnutls --repository https://dl-cdn.alpinelinux.org/alpine/edge/main/ --update-cache  && \
+        rm -rf /var/cache/apk/*
+
+USER zipkin
+
+ENV QUERY_PORT={{DOCKER_PORT}}
+ENV SELF_TRACING_ENABLED=false
+
+EXPOSE {{DOCKER_PORT}}

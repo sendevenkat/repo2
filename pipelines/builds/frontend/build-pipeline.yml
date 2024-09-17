@@ -1,0 +1,38 @@
+parameters:
+- name: version
+  displayName: "Version"
+  type: string
+  default: gs
+  values:
+  - dms
+  - gs
+  - pimco2
+  - trms
+  - trp
+  - demo
+
+resources:
+  repositories:
+  - repository: eycomply-base
+    name: ey-org/eycomply-base
+    endpoint: eycomply-devops-pipeline
+    type: github
+    ref: master
+
+variables:
+- template: pipelines/builds/templates/build-variables.yml@eycomply-base
+
+trigger: none
+pr:
+- develop
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+  path: service-repository
+- checkout: eycomply-base
+- template: pipelines/builds/frontend/build-ui-artifact.yml@eycomply-base
+  parameters:
+    version: "${{ parameters.version }}"

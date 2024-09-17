@@ -1,0 +1,41 @@
+parameters:
+- name: taskName
+  type: string
+- name: displayName
+  type: string
+- name: name
+  type: string
+- name: environment
+  type: string
+- name: location
+  type: string
+- name: inputs
+  type: object
+  default: {}
+- name: customCondition
+  type: string
+  default: ' '
+- name: serviceConnection
+  type: string
+
+steps:
+- task: "${{ parameters.taskName }}"
+  displayName: "${{ parameters.displayName }}"
+  name: "${{ parameters.name }}"
+  inputs:
+    var_location: "${{ parameters.location }}"
+    var_environment: "${{ parameters.environment }}"
+    var_owner: "$(var_owner)"
+    var_chargeCode: "$(var_chargeCode)"
+    var_deploymentId: "$(var_deploymentId)"
+    var_productApp: "$(var_productApp)"
+    var_azure_rm_subid: "$(var_azure_rm_subid)"
+    var_omsSubscriptionId: "$(var_omsSubscriptionId)"
+    var_omsResourceGroup: "$(var_omsResourceGroup)"
+    var_omsWorkspaceName: "$(var_omsWorkspaceName)"
+    azureConnection: "${{ parameters.serviceConnection }}"
+    ansibleTowerConn: "Ansible Prod connection"
+    credentials: "$(credentials)"
+    Wait: "Wait"
+    ${{ insert }}: "${{ parameters.inputs }}"
+  condition: "${{ parameters.customCondition }}"

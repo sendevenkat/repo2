@@ -1,0 +1,49 @@
+# Dockerfile for Demo environment
+FROM {{DOCKER_BASE_IMAGE}}
+WORKDIR '/app'
+
+# Prepare environment
+ENV CLIENT {{ENV}}
+#ENV JAVA_HOME {{JAVA_HOME_DOCKER}}
+ENV CATALINA_HOME {{CATALINA_HOME}}
+ENV PATH /opt/gradle/gradle-6.2.2/bin:/sbin:/bin:/usr/sbin:/usr/bin:{{JAVA_HOME_DOCKER}}/bin:{{CATALINA_HOME}}/bin:{{CATALINA_HOME}}/scripts
+
+RUN mkdir -p /opt/tomcat/tomcat_{{ENV}}
+RUN chown -R tomcat:tomcat /opt/tomcat
+
+COPY apache-tomcat-8.5.85.tar.gz /opt/tomcat/tomcat_{{ENV}}
+
+RUN cd /opt/tomcat/tomcat_{{ENV}} && tar -xvf apache-tomcat-8.5.85.tar.gz --strip-components=1 && rm apache-tomcat-8.5.85.tar.gz
+
+COPY setenv.sh /opt/tomcat/tomcat_{{ENV}}/bin
+COPY web.xml /opt/tomcat/tomcat_{{ENV}}/conf
+COPY *.jar /opt/tomcat/tomcat_{{ENV}}/lib
+
+RUN chown -R tomcat:tomcat /opt/tomcat/tomcat_{{ENV}}
+
+# Copy UI directories from dist
+COPY dist/eyc-ServiceEngine-UI /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-admin /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-charts-shared-library /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-data-managed-services /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-european-fund-reporting /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-regulatory-reporting /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-tax-reporting /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-ui-shared-component /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-financial-reporting /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+
+COPY server.xml /opt/tomcat/tomcat_{{ENV}}/conf
+
+RUN chown -R tomcat:tomcat /opt/tomcat/tomcat_{{ENV}}
+
+WORKDIR '/opt/tomcat'
+
+EXPOSE 8080
+EXPOSE 8009
+
+USER tomcat
+
+ADD environment.var /opt/tomcat
+
+# Default command
+CMD ["catalina.sh", "run"]

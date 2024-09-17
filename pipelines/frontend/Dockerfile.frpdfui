@@ -1,0 +1,15 @@
+FROM python:3.10-alpine
+
+RUN mkdir -p /opt/frpdfextraction-service
+
+RUN groupadd frpdfextraction-service
+RUN useradd -M  -g frpdfextraction-service -d /opt/frpdfextraction-service frpdfextraction-service
+
+WORKDIR /opt/frpdfextraction-service
+
+COPY artifacts/ .
+
+RUN pip install -r requirements.txt
+
+ENTRYPOINT [ "python" ]
+CMD [ "demo.py" ]

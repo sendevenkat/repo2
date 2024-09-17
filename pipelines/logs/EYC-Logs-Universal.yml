@@ -1,0 +1,100 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - qa36
+  - qa37
+  - qabcm
+  - perftest
+  - uat
+  - prod
+
+- name: microservice
+  displayName: "Microservice"
+  type: string
+  default: authentication
+  values:
+  - audit
+  - auditui
+  - authentication
+  - authorization
+  - bcmregreporting
+  - bcmregmonitoring
+  - boardreporting
+  - camundawrapper
+  - clamav
+  - comments
+  - configuration
+  - configserver
+  - dataprovider
+  - discovery
+  - dlqprocessor
+  - dlqprocessorui
+  - dmsdataintake
+  - document
+  - download
+  - expensereporting
+  - finreport
+  - frpdfextraction
+  - gateway
+  - logging
+  - metadata
+  - notificationengine
+  - notificationclient
+  - notifieragent
+  - outboundgateway
+  - pbireport
+  - rrcollaboration
+  - regreporting
+  - sbadmin
+  - sendoutengine
+  - standardizergateway
+  - taxreporting
+  - topsides
+  - tracker
+  - trackerui
+  - zipkin
+  - zipkinui
+
+variables:
+- template: ../../variables/resource-groups.yml
+- template: ../../variables/subscriptions.yml
+- template: ../../variables/clusters.yml
+- name: var_namespace
+  ${{ if eq(parameters['environment'], 'qabcm')}}:
+    value: "bcm"
+  ${{ elseif or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    value: "eycomply"
+  ${{ else }}:
+    value: "${{ parameters.environment }}"
+
+steps:
+- task: AzureCLI@2
+  displayName: Get logs
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az aks get-credentials --admin -g "$(${{ parameters.environment }}-rg)" -n "$(${{ parameters.environment }}-cluster)"
+      pod_array=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" --namespace $(var_namespace))
+
+      for pod in ${pod_array}
+      do
+        if [[ $pod == eycomplyapp-${{ parameters.environment }}-deploy-${{ parameters.microservice }}service-* ]]; then
+          echo "SHOWING LOGS FOR POD:" $pod
+          kubectl logs $pod -n $(var_namespace) -f=false
+          echo ----------------------------------------------------------
+        fi
+      done

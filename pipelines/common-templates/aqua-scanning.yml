@@ -1,0 +1,36 @@
+parameters:
+- name: aquasecLogin
+  type: string
+- name: aquasecAcr
+  type: string
+- name: aquasecScannerConn
+  type: string
+- name: imagePath
+  type: string
+
+steps:
+- task: Docker@2
+  displayName: 'Login to Aquasec'
+  inputs:
+    containerRegistry: '${{ parameters.aquasecLogin }}'
+    command: 'login'
+  continueOnError: true
+
+- task: aquasec.aquasec.showCommits.aquasecScanner@4
+  displayName: 'Scan image with Aquasec'
+  inputs:
+    image: '${{ parameters.imagePath }}'
+    scanType: 'local'
+    register: false
+    hideBase: false
+    showNegligible: true
+    windowsScannerVersion: '6.5.0'
+    scanner: '${{ parameters.aquasecAcr }}.azurecr.io/aquasec/scanner:6.5.23137'
+    runOptions: '--privileged'
+    registry: eycomplynonprod
+    connection: '${{ parameters.aquasecScannerConn }}'
+    customFlags: '--direct-cc'
+    caCertificates: true
+    scanMalware: true
+    registerCompliant: true
+  continueOnError: true

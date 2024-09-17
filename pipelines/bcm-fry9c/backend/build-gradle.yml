@@ -1,0 +1,56 @@
+steps:
+- script: |
+    chmod +x $(GRADLEW_FILE)
+  displayName: 'Gradle: make gradlew executable'
+  condition: and(succeeded(), eq(variables.IS_GRADLE, 'true'))
+  enabled: true
+
+- script: |
+    set -x
+    DEFAULT_JDK_VER=17
+    DISCOVERED_JDK_VER=$(egrep '^(\s*sourceCompatibility|\s*java.sourceCompatibility)' $(BUILDGRADLE_FILE) |egrep -o '([0-9][0-9])' |head -1)
+
+    if [[ $DISCOVERED_JDK_VER =~ $DEFAULT_JDK_VER ]]
+    then
+      echo "##vso[task.setvariable variable=GRADLE_JDK_VER]$DEFAULT_JDK_VER"
+    else
+      echo "##vso[task.setvariable variable=GRADLE_JDK_VER]$DISCOVERED_JDK_VER"
+    fi 
+
+  displayName: 'Gradle: set JDK for build'
+  condition: and(succeeded(), eq(variables.IS_GRADLE, 'true'))
+  enabled: true
+
+- script: |
+    echo GRADLEW_DIRECTORY is '$(GRADLEW_DIRECTORY)'
+    echo GRADLEW_FILE is '$(GRADLEW_FILE)'
+    echo BUILDGRADLE_FILE is '$(BUILDGRADLE_FILE)'
+    echo GRADLE_JDK_VER is '$(GRADLE_JDK_VER)'
+
+  displayName: 'Gradle: display variables'
+  condition: and(succeeded(), eq(variables.IS_GRADLE, 'true'))
+  enabled: true
+
+- task: Gradle@3
+  displayName: 'Gradle: build'
+  inputs:
+    gradleWrapperFile: '$(GRADLEW_FILE)'
+    workingDirectory: '$(GRADLEW_DIRECTORY)'
+    tasks: 'build'
+    publishJUnitResults: false
+    javaHomeOption: 'JDKVersion'
+    jdkVersionOption: '1.$(GRADLE_JDK_VER)'
+    sonarQubeRunAnalysis: true
+    sqGradlePluginVersionChoice: 'specify'
+    sonarQubeGradlePluginVersion: '3.2.0'
+    spotBugsAnalysis: false
+  condition: and(succeeded(), eq(variables.IS_GRADLE, 'true'))
+  enabled: true
+
+- ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - script: |
+        cd $(GRADLEW_DIRECTORY)/build/libs/
+        cp $(build.artifactstagingdirectory)/build.var .
+        zip -r backend.zip ./*
+      displayName: 'Gradle: compress artifact'
+      condition: and(succeeded(), eq(variables.IS_GRADLE, 'true'))

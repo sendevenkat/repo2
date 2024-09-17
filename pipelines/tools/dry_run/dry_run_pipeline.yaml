@@ -1,0 +1,136 @@
+trigger:
+- none
+
+pr: none
+
+pool:
+  vmImage: 'windows-latest'
+
+parameters:
+- name: sourceDatabaseName
+  type: string
+
+stages:
+- stage: DBDryRun
+  jobs:
+  - job: DBDryRun
+    variables:
+      - template: ../../../variables/dry-run.yml  # Import variables from variables.yml
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Check if clone DB already exists'
+      inputs:
+        azureSubscription: 'EYComply Production'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          #!/bin/bash
+          # Set variables for source and target managed instances
+          sourceResourceGroup="$(sourceResourceGroup)"
+          sourceSubscription="$(sourceSubscription)"
+          sourceManagedInstance="$(sourceManagedInstance)"
+          targetSubscription="$(targetSubscription)"
+          targetManagedInstance="$(targetManagedInstance)"
+          
+          # Set the name of the source and target databases
+          sourceDatabase="${{ parameters.sourceDatabaseName }}"
+          targetDatabase="Clone_${sourceDatabase}"
+
+          # check if the database exists
+          az sql midb show --managed-instance $targetManagedInstance --name $targetDatabase --resource-group $sourceResourceGroup 2>/dev/null
+          if [ $? -eq 0 ]; then
+              # Database exists
+              echo "Database '$targetDatabase' exists in Azure SQL Managed Instance '$targetManagedInstance'."
+              echo "-------------------------------------------------------------------"
+              echo "-------------------------------------------------------------------"
+              echo "Dropping database '$targetDatabase' from Azure SQL Managed Instance '$targetManagedInstance'."
+              az sql midb delete --managed-instance $targetManagedInstance --name $targetDatabase --resource-group $sourceResourceGroup --yes
+              echo "Database '$targetDatabase' has been dropped."
+              echo "-------------------------------------------------------------------"
+              echo "-------------------------------------------------------------------"
+              echo "Creating '$targetDatabase' in Azure SQL Managed Instance '$targetManagedInstance'."
+              pointInTime="$(az sql midb show --resource-group $sourceResourceGroup --mi $sourceManagedInstance --name $sourceDatabase --query earliestRestorePoint -o tsv)"
+              # Restore the database from the source to the target managed instance
+              az sql midb restore -s $sourceSubscription -g $sourceResourceGroup --mi $sourceManagedInstance -n $sourceDatabase --dest-name $targetDatabase --dest-mi $targetManagedInstance --time $pointInTime
+              echo "-------------------------------------------------------------------"
+              echo "-------------------------------------------------------------------"
+              echo "Database $targetDatabase has been created in Azure SQL Managed Instance '$targetManagedInstance'."
+          else
+              # Database does not exist
+              echo "Database '$targetDatabase' does not exist in Azure SQL Managed Instance '$targetManagedInstance'."
+              echo "-------------------------------------------------------------------"
+              echo "-------------------------------------------------------------------"
+              echo "Creating '$targetDatabase' in Azure SQL Managed Instance '$targetManagedInstance'."
+              # Set the point-in-time to restore from
+              pointInTime="$(az sql midb show --resource-group $sourceResourceGroup --mi $sourceManagedInstance --name $sourceDatabase --query earliestRestorePoint -o tsv)"
+              # Restore the database from the source to the target managed instance
+              az sql midb restore -s $sourceSubscription -g $sourceResourceGroup --mi $sourceManagedInstance -n $sourceDatabase --dest-name $targetDatabase --dest-mi $targetManagedInstance --time $pointInTime
+              echo "-------------------------------------------------------------------"
+              echo "-------------------------------------------------------------------"
+              echo "Database $targetDatabase has been created in Azure SQL Managed Instance '$targetManagedInstance'."
+          fi
+
+
+    - task: AzureCLI@2
+      displayName: 'Clone DB from source MI to target MI'
+      inputs:
+        azureSubscription: 'EYComply Production'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          #!/bin/bash
+          
+          # Set variables for source and target managed instances
+          sourceResourceGroup="$(sourceResourceGroup)"
+          sourceSubscription="$(sourceSubscription)"
+          sourceManagedInstance="$(sourceManagedInstance)"
+          targetSubscription="$(targetSubscription)"
+          targetManagedInstance="$(targetManagedInstance)"
+          
+          # Set the name of the source and target databases
+          sourceDatabase="${{ parameters.sourceDatabaseName }}"
+          targetDatabase="Clone_${sourceDatabase}"
+          
+          # Set the point-in-time to restore from
+          pointInTime="$(az sql midb show --resource-group $sourceResourceGroup --mi $sourceManagedInstance --name $sourceDatabase --query earliestRestorePoint -o tsv)"
+          
+          # Restore the database from the source to the target managed instance
+          az sql midb restore -s $sourceSubscription -g $sourceResourceGroup --mi $sourceManagedInstance -n $sourceDatabase --dest-name $targetDatabase --dest-mi $targetManagedInstance --time $pointInTime
+      enabled: false
+
+    - task: SqlAzureDacpacDeployment@1
+      displayName: 'Grant user access to newly created DB'
+      inputs:
+        azureSubscription: 'EYComply Production'
+        AuthenticationType: 'server'
+        ServerName: 'useueyc002mis01.public.cbdac4ecd1e7.database.windows.net,3342'
+        DatabaseName: 'Clone_${{ parameters.sourceDatabaseName}}'
+        SqlUsername: '$(sqllogin)'
+        SqlPassword: '$(sqlpass)'
+        deployType: 'InlineSqlTask'
+        SqlInline: |
+          USE [Clone_${{ parameters.sourceDatabaseName}}]
+          GO
+          if not exists(select * from sys.database_principals where name = 'ngopal')
+          	CREATE USER [ngopal] FOR LOGIN [ngopal]
+          if not exists(select * from sys.database_principals where name = 'tshan')
+          	CREATE USER [tshan] FOR LOGIN [tshan]
+          if not exists(select * from sys.database_principals where name = 'osingh')
+          	CREATE USER [osingh] FOR LOGIN [osingh]
+          if not exists(select * from sys.database_principals where name = 'aarora')
+          	CREATE USER [aarora] FOR LOGIN [aarora]
+          if not exists(select * from sys.database_principals where name = 'SSrinidhi')
+          	CREATE USER [SSrinidhi] FOR LOGIN [SSrinidhi]
+          if not exists(select * from sys.database_principals where name = 'bdharan')
+          	CREATE USER [bdharan] FOR LOGIN [bdharan]
+          GO
+          USE [Clone_${{ parameters.sourceDatabaseName}}]
+          GO
+          ALTER ROLE [db_owner] ADD MEMBER [ngopal]
+          ALTER ROLE [db_owner] ADD MEMBER [tshan]
+          ALTER ROLE [db_owner] ADD MEMBER [osingh]
+          ALTER ROLE [db_owner] ADD MEMBER [aarora]
+          ALTER ROLE [db_owner] ADD MEMBER [SSrinidhi]
+          ALTER ROLE [db_owner] ADD MEMBER [bdharan]
+          GO
+        IpDetectionMethod: 'AutoDetect'

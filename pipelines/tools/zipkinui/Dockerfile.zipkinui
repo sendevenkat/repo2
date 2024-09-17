@@ -1,0 +1,34 @@
+FROM openzipkin/zipkin-ui
+
+USER root
+RUN sed -i 's/v3.12/v3.15/g' /etc/apk/repositories
+RUN apk update --allow-untrusted && \
+    apk add --allow-untrusted --upgrade apk-tools && \
+    apk upgrade --allow-untrusted --available
+
+ENV ZIPKIN_BASE_URL=http://eycomplyapp-{{ENV}}-service-zipkinservice:{{DOCKER_PORT}}
+
+RUN echo 'developer:$apr1$dB9Ma9ZQ$x7kBLn8b4rptu31q.aIFB0' > /etc/nginx/.htpasswd
+
+RUN sed -i -E 's/listen[[:space:]]+[[:digit:]]+/listen {{DOCKER_PORT}}/' /etc/nginx/conf.d/zipkin.conf.template && \
+        sed -i -E '/^[[:space:]]+location[[:space:]]+\/zipkin/a auth_basic_user_file /etc/nginx/.htpasswd;' /etc/nginx/conf.d/zipkin.conf.template && \
+        sed -i -E '/^[[:space:]]+location[[:space:]]+\/zipkin/a auth_basic "Please login to access the UI";' /etc/nginx/conf.d/zipkin.conf.template && \
+        sed -i 's+<base href="/zipkin/">+<base href="/{{ENV}}/zipkin/">+' /var/www/html/zipkin/index.html
+
+RUN mkdir /var/www/html/{{ENV}} && \
+    ln -s /var/www/html/zipkin /var/www/html/{{ENV}}/zipkin
+
+ENV HEALTHCHECK_PORT={{DOCKER_PORT}}
+EXPOSE {{DOCKER_PORT}}
+
+RUN addgroup nginx_grp --gid 1000 && adduser --uid 1000 --disabled-password --ingroup nginx_grp --no-create-home nginx_usr
+
+## add permissions
+RUN chown -R nginx_usr:nginx_grp /var/cache/nginx && \
+    chown -R nginx_usr:nginx_grp /var/log/nginx && \
+    chown -R nginx_usr:nginx_grp /etc/nginx/
+
+RUN touch /var/run/nginx.pid && \
+    chown -R nginx_usr:nginx_grp /var/run/nginx.pid
+
+USER 1000

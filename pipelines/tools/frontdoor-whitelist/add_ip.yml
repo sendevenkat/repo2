@@ -1,0 +1,83 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: frontDoorInstance
+  displayName: "Front Door instance:"
+  type: string
+  default: USEDEYC003AFD01
+  values:
+  - USEDEYC003AFD01
+
+- name: ipAddress
+  displayName: "Enter your IP address:"
+  type: string
+
+variables:
+  USEDEYC003AFD01-RG: USEDEYCEYCRSG01
+
+steps:
+- task: AzureCLI@2
+  displayName: Add IP to whitelist
+  inputs:
+    azureSubscription: "EYC-Non-Prod-Subscription"
+    scriptType: "bash"
+    scriptLocation: "inlineScript"
+    inlineScript: |
+      #Install FD extension
+      az config set extension.use_dynamic_install=yes_without_prompt
+
+      #Fetch current IP list
+      IPLIST="$(az network front-door waf-policy rule match-condition list \
+      --name IpRestriction \
+      --resource-group $(${{ parameters.frontDoorInstance }}-RG) \
+      --policy-name ${{ parameters.frontDoorInstance }}AZManagedRulesPolicy \
+      --query "[0].matchValue" \
+      --output tsv)"
+
+      echo "Old list of allowed IPs:"
+      for ip in ${IPLIST[@]}; do
+        echo $ip
+      done
+
+      #Append new IP
+      IPLIST+=("${{ parameters.ipAddress }}")
+
+      echo --------------------------------------------
+      echo "Updated list of allowed IPs:"
+      for ip in ${IPLIST[@]}; do
+        echo $ip
+      done
+
+      #Create match condition with updated IP list
+      az network front-door waf-policy rule match-condition add \
+      --match-variable RemoteAddr \
+      --operator IPMatch \
+      --values ${IPLIST[@]} \
+      --negate true \
+      --name IpRestriction \
+      --resource-group $(${{ parameters.frontDoorInstance }}-RG) \
+      --policy-name ${{ parameters.frontDoorInstance }}AZManagedRulesPolicy
+
+      #Delete old match condition
+      az network front-door waf-policy rule match-condition remove \
+      --index 0 \
+      --name IpRestriction \
+      --resource-group $(${{ parameters.frontDoorInstance }}-RG) \
+      --policy-name ${{ parameters.frontDoorInstance }}AZManagedRulesPolicy
+
+- script: |
+    echo Front Door instance is: ${{ parameters.frontDoorInstance }}
+    echo IP Address is: ${{ parameters.ipAddress }}
+    echo -----------------------------------------------
+    echo BuildId is $(Build.BuildId)
+    echo Build.BuildNumber is $(Build.BuildNumber)
+    echo Build.DefinitionVersion is $(Build.DefinitionVersion)
+    echo Queued by: $(Build.QueuedBy)
+    echo Queued by ID: $(Build.QueuedById)
+    echo Build was $(Build.Reason) triggered
+  displayName: "Display variables"
+  condition: succeededOrFailed()

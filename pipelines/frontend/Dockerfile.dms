@@ -1,0 +1,41 @@
+# Dockerfile for UATTRP01, TRP and PerfTRP environments
+#FROM eycomplynonprod.azurecr.io/basefedorajre:fedora36complete04.04.2022
+FROM {{DOCKER_BASE_IMAGE}}
+#RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-Linux-* && sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-Linux-*
+# Install prepare infrastructure
+#RUN yum -y update && yum -y install wget && yum -y install tar && yum -y install telnet && yum clean all
+WORKDIR '/app'
+#COPY jdk-11.0.11_linux-x64_bin.rpm .
+#RUN rpm -ivh jdk-11.0.11_linux-x64_bin.rpm
+# Prepare environment
+ENV CLIENT {{ENV}}
+#ENV JAVA_HOME {{JAVA_HOME_DOCKER}}
+ENV CATALINA_HOME {{CATALINA_HOME}}
+ENV PATH /opt/gradle/gradle-6.2.2/bin:/sbin:/bin:/usr/sbin:/usr/bin:{{JAVA_HOME_DOCKER}}/bin:{{CATALINA_HOME}}/bin:{{CATALINA_HOME}}/scripts
+RUN mkdir -p /opt/tomcat/tomcat_{{ENV}}
+#RUN groupadd tomcat
+#RUN useradd -M -g tomcat -d /opt/tomcat tomcat
+RUN chown -R tomcat:tomcat /opt/tomcat
+COPY apache-tomcat-8.5.85.tar.gz /opt/tomcat/tomcat_{{ENV}}
+RUN cd /opt/tomcat/tomcat_{{ENV}} && tar -xvf apache-tomcat-8.5.85.tar.gz --strip-components=1 && rm apache-tomcat-8.5.85.tar.gz
+COPY setenv.sh /opt/tomcat/tomcat_{{ENV}}/bin
+COPY web.xml /opt/tomcat/tomcat_{{ENV}}/conf
+COPY *.jar /opt/tomcat/tomcat_{{ENV}}/lib
+RUN chown -R tomcat:tomcat /opt/tomcat/tomcat_{{ENV}}
+# Copy UI directories from dist
+COPY dist/eyc-ServiceEngine-UI /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-charts-shared-library /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-data-managed-services /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-ui-shared-component /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY dist/eyc-financial-reporting /opt/tomcat/tomcat_{{ENV}}/webapps/ROOT/{{ENV}}/
+COPY server.xml /opt/tomcat/tomcat_{{ENV}}/conf
+RUN chown -R tomcat:tomcat /opt/tomcat/tomcat_{{ENV}}
+WORKDIR '/opt/tomcat'
+EXPOSE 8080
+EXPOSE 8009
+USER tomcat
+
+ADD environment.var /opt/tomcat
+
+# Default command
+CMD ["catalina.sh", "run"]

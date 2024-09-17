@@ -1,0 +1,58 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - prod
+
+- name: microservice
+  displayName: "Microservice"
+  type: string
+  default: fry9c
+  values:
+  - fry9c
+  - fry9cdataload
+
+- name: namespace
+  displayName: "AKS Namespace"
+  type: string
+  default: fry9c
+  values:
+  - fry9c
+
+variables:
+- template: ../../../variables/resource-groups.yml
+- template: ../../../variables/subscriptions.yml
+- template: ../../../variables/clusters.yml
+- name: var_namespace
+  value: "${{ parameters.namespace }}"
+
+steps:
+- task: AzureCLI@2
+  displayName: Get logs
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      az aks get-credentials --admin -g "$(${{ parameters.environment }}-rg)" -n "$(${{ parameters.environment }}-cluster)"
+      pod_array=$(kubectl get pods --no-headers -o custom-columns=":metadata.name" --namespace $(var_namespace))
+
+      for pod in ${pod_array}
+      do
+        if [[ $pod == eycomplyapp-${{ parameters.environment }}-deploy-${{ parameters.microservice }}service-* ]]; then
+          echo "SHOWING LOGS FOR POD:" $pod
+          kubectl logs $pod -n $(var_namespace) -f=false
+          echo ----------------------------------------------------------
+        fi
+      done

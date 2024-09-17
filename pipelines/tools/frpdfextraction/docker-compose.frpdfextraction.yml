@@ -1,0 +1,9 @@
+version: '3'
+services:
+    eycomply-app:
+      image: eyctpeu-eycomply-docker-dev-eu.jfrog.io/eycomply-extraction-module-fr:${TAG}
+      build:
+        dockerfile: Dockerfile.frpdfextraction
+        context: .
+      ports:
+        - "8080:8080"

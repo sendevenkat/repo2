@@ -1,0 +1,9 @@
+version: '3'
+services:
+    eycomply-app:
+      image: eyctpeu-eycomply-docker-dev-eu.jfrog.io/fry9c-dataload-module:${TAG}
+      build:
+        dockerfile: Dockerfile.fry9cdataload
+        context: .
+      ports:
+        - "8080:8080"

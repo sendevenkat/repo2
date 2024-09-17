@@ -1,0 +1,2 @@
+variables:
+- group: eyc-whitesource-api-credentials

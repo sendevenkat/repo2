@@ -1,0 +1,262 @@
+
+resources:
+  repositories:
+  - repository: eyc-cm-nonprod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-nonprod
+
+  - repository: eyc-cm-prod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-prod
+  
+trigger: none
+pr: none
+pool:
+  vmImage: 'ubuntu-latest'
+
+parameters:
+- name: qa33
+  displayName: QA33
+  type: boolean
+  default: false
+
+- name: qa36
+  displayName: QA36
+  type: boolean
+  default: false
+
+- name: qa37
+  displayName: QA37
+  type: boolean
+  default: false
+  
+- name: qabcm
+  displayName: QA BCM
+  type: boolean
+  default: false
+
+- name: perftest
+  displayName: perftest
+  type: boolean
+  default: false
+
+- name: uat
+  displayName: UAT
+  type: boolean
+  default: false
+
+- name: production
+  displayName: Production
+  type: boolean
+  default: false
+
+
+
+variables:
+- group: eyc-sendgrid
+- template: "../../variables/retrieve-config-map.yml"
+  parameters:
+    qa33: "${{ parameters.qa33 }}"
+    qa36: "${{ parameters.qa36 }}"
+    qa37: "${{ parameters.qa37 }}"
+    qabcm: "${{ parameters.qabcm }}"
+    perftest: "${{ parameters.perftest }}"
+    uat: "${{ parameters.uat }}"
+    production: "${{ parameters.production }}"
+
+
+
+stages:
+- stage: RetrieveConfigMap
+
+  pool: 
+    vmImage: ubuntu-latest
+
+  jobs:
+  - deployment: RetrieveConfigMap
+    environment: "EY Comply - Retrieve Config Map"
+    timeoutInMinutes: 0
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+
+          - checkout: eyc-cm-nonprod
+
+          - checkout: eyc-cm-prod
+
+          - ${{ if eq(parameters.qa33, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "qa33"
+                serviceConnection: "$(developmentServiceConnection)"
+                subscriptionId: "$(developmentSubscriptionId)"
+
+          - ${{ if eq(parameters.qa36, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "qa36"
+                serviceConnection: "$(developmentServiceConnection)"
+                subscriptionId: "$(developmentSubscriptionId)"
+
+          - ${{ if eq(parameters.qa37, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "qa37"
+                serviceConnection: "$(developmentServiceConnection)"
+                subscriptionId: "$(developmentSubscriptionId)"
+
+          - ${{ if eq(parameters.qabcm, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "qabcm"
+                serviceConnection: "$(developmentServiceConnection)"
+                subscriptionId: "$(developmentSubscriptionId)"
+
+          - ${{ if eq(parameters.perftest, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "perftest"
+                serviceConnection: "$(developmentServiceConnection)"
+                subscriptionId: "$(developmentSubscriptionId)"
+
+          - ${{ if eq(parameters.uat, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "uat"
+                serviceConnection: "$(productionServiceConnection)"
+                subscriptionId: "$(productionSubscriptionId)"
+
+          - ${{ if eq(parameters.production, true) }}:
+            - template: ./templates/retrieve_config_map.yml
+              parameters:
+                environment: "production"
+                serviceConnection: "$(productionServiceConnection)"
+                subscriptionId: "$(productionSubscriptionId)"
+          
+          - task: PowerShell@2
+            displayName: "Zip Config Map files"
+            inputs:
+              targetType: inline
+              pwsh: true
+              script: |
+                $compress = @{
+                  Path = "$(destinationFolder)/*";
+                  CompressionLevel = "Fastest"
+                  destinationPath = "$(configMapsZip)";
+                }
+
+                Compress-Archive @compress;
+            condition: and(eq(variables['Agent.JobStatus'], 'Succeeded'), or(eq(${{ parameters.qa33 }}, True), eq(${{ parameters.qa36 }}, True), eq(${{ parameters.qa37 }}, True), eq(${{ parameters.perftest }}, True), eq(${{ parameters.uat }}, True), eq(${{ parameters.production }}, True)))
+
+          - task: PowerShell@2
+            displayName: "Create E-mail Subject and Body contents"
+            inputs:
+              targetType: inline
+              pwsh: true
+              script: |
+                $environments = "$(environments)" | ConvertFrom-Json;
+                $subject = "EYC2 Config Maps: ";
+
+                foreach ($environment in $environments) {
+                  if ($environment.value -eq $true) {
+                    $name = $environment.name;
+
+                    $subject += "$name - ";
+
+                    $body += "<li>$name</span>";
+                  }
+                }
+
+                $subject = $subject.TrimEnd(" - ");
+
+                $contact = "$(Build.RequestedForEmail)".ToLower(); 
+                $engineeringContacts = "$(sendgrid.engineeringContacts)".ToLower();
+
+                $engineeringContacts = $engineeringContacts.replace(",$contact", "");
+                $engineeringContacts = $engineeringContacts.replace($contact, "");
+
+                Write-Host ("##vso[task.setvariable variable=body]$body");
+                Write-Host ("##vso[task.setvariable variable=subject]$subject");
+                Write-Host ("##vso[task.setvariable variable=engineeringContacts]$engineeringContacts");
+            condition: and(eq(variables['Agent.JobStatus'], 'Succeeded'), or(eq(${{ parameters.qa33 }}, True), eq(${{ parameters.qa36 }}, True), eq(${{ parameters.qa37 }}, True), eq(${{ parameters.perftest }}, True), eq(${{ parameters.uat }}, True), eq(${{ parameters.production }}, True)))
+
+          - task: citrus-andriessen.cag-sendgrid.custom-build-release-task.SendGrid@1
+            displayName: "Send e-mail to $(Build.RequestedFor)"
+            inputs:
+              sendgridkey: "$(sendgrid.apiKey)"
+              from: "$(Build.RequestedForEmail)"
+              to: "$(engineeringContacts)"
+              cc: "$(sendgrid.GID),$(Build.RequestedForEmail)"
+              subject: "$(subject)"
+              htmlbody: >
+                    <style>
+                      @font-face {font-family:Wingdings; panose-1:5 0 0 0 0 0 0 0 0 0; mso-font-charset:2; mso-generic-font-family:auto; mso-font-pitch:variable; mso-font-signature:0 268435456 0 0 -2147483648 0;}
+                      @font-face {font-family:"Cambria Math"; panose-1:2 4 5 3 5 4 6 3 2 4; mso-font-charset:0; mso-generic-font-family:roman; mso-font-pitch:variable; mso-font-signature:-536869121 1107305727 33554432 0 415 0;}
+                      @font-face {font-family:Calibri; panose-1:2 15 5 2 2 2 4 3 2 4; mso-font-charset:0; mso-generic-font-family:swiss; mso-font-pitch:variable; mso-font-signature:-469750017 -1073732485 9 0 511 0;}
+                      @font-face {font-family:"EYInterstate Light"; panose-1:2 0 5 6 0 0 0 2 0 4; mso-font-charset:0; mso-generic-font-family:auto; mso-font-pitch:variable; mso-font-signature:-1610612049 1342185578 0 0 159 0;}
+                      @font-face {font-family:EYInterstate; panose-1:2 0 5 3 2 0 0 2 0 4; mso-font-charset:0; mso-generic-font-family:auto; mso-font-pitch:variable; mso-font-signature:-2147482961 1342185546 0 0 159 0;}
+                      @font-face {font-family:"Segoe UI"; panose-1:2 11 5 2 4 2 4 2 2 3; mso-font-charset:0; mso-generic-font-family:swiss; mso-font-pitch:variable; mso-font-signature:-469750017 -1073683329 9 0 511 0;}
+                      
+                      * {font-family:"EYInterstate Light"; text-align:justify; font-size:11.0pt;}
+                      p, li, td {font-family:"EYInterstate Light"; font-size:11.0pt;}
+                      a:link {mso-style-noshow:yes; mso-style-priority:99; color:#0563C1; text-decoration:underline; text-underline:single;}
+                      a:visited {mso-style-noshow:yes; mso-style-priority:99; color:#954F72; text-decoration:underline; text-underline:single;}
+                      h3 {font-size:14.0pt; font-family:"EYInterstate"; font-weight:bold;}
+                      ul {margin-bottom:0cm;}
+                      li {mso-style-unhide:no; mso-style-qformat:yes; mso-style-parent:""; margin:0cm; mso-pagination:widow-orphan;}
+                      tr {mso-yfti-irow:0; mso-yfti-firstrow:yes; height:23.85pt}
+                      td {width:136.8pt; border:none; border-bottom:solid windowtext 1.0pt;}
+                      th {text-align:center; width:136.8pt; border:none; border-bottom:solid windowtext 1.0pt; background:#FFE600; padding:0cm 5.4pt 0cm 5.4pt; height:23.85pt}
+                      .border {border:none; border-bottom:solid windowtext 1.0pt;padding:0cm 0cm 1.0pt 0cm;}
+                      .bold {font-family:"EYInterstate"; font-weight:bold;}
+                      .center {text-align:center;}
+
+                      @list l0 {mso-list-id:1951887800; mso-list-type:hybrid; mso-list-template-ids:-1653429826 1813913852 67698691 67698693 67698689 67698691 67698693 67698689 67698691 67698693;}
+                      @list l0:level1 {mso-level-number-format:bullet; mso-level-text:•; mso-level-tab-stop:none; mso-level-number-position:left; margin-left:14.4pt; text-indent:-14.4pt; mso-ansi-font-size:11.0pt; mso-bidi-font-size:11.0pt; font-family:EYInterstate; color:#FFE600;}
+                      @list l0:level2 {mso-level-number-format:bullet; mso-level-text:o; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:"Courier New";}
+                      @list l0:level3 {mso-level-number-format:bullet; mso-level-text:\\F0A7; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:Wingdings;}
+                      @list l0:level4 {mso-level-number-format:bullet; mso-level-text:\\F0B7; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:Symbol;}
+                      @list l0:level5 {mso-level-number-format:bullet; mso-level-text:o; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:"Courier New";}
+                      @list l0:level6 {mso-level-number-format:bullet; mso-level-text:\\F0A7; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:Wingdings;}
+                      @list l0:level7 {mso-level-number-format:bullet; mso-level-text:\\F0B7; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:Symbol;}
+                      @list l0:level8 {mso-level-number-format:bullet; mso-level-text:o; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:"Courier New";}
+                      @list l0:level9 {mso-level-number-format:bullet; mso-level-text:\\F0A7; mso-level-tab-stop:none; mso-level-number-position:left; text-indent:-18.0pt; font-family:Wingdings;}
+                      ol {margin-bottom:0cm;}
+                      ul {margin-bottom:0cm;}
+                    </style>
+
+                    <p>Dear <span class="bold">$(Build.RequestedFor)</span>,
+                      <br/><br/>
+                      The Config Maps requested have been retrieved with their respective values. Please unzip the attached file to review the contents.
+                      <br/><br/>
+                    </p>
+                    
+                    <div class="border">
+                      <h3>Environments</h3>
+                    </div>
+                    <ul>
+                      $(body)
+                    </ul>
+
+                    <p>Thank you for using the <a href="https://fso-to.visualstudio.com/FSO-Project%20Fusion/_build?definitionId=11252&_a=summary">EYC2-Retrieve_ConfigMap</a> automation!
+                      <br/><br/>
+                      If you have any doubts regarding its usage, please check on the <a href="https://connect.eyfabric.ey.com/eydx/content/004b5d8a-7d66-453f-b7be-a4a058e7a244">EY Comply Retrieve Config Map Pipeline</a> guide.
+                      <br/><br/>
+                      If you would like to share any feedback with us, please reach out to the team via our GID: $(sendgrid.GID)
+                    </p>
+
+                    <br/>
+
+                    <p>Best regards,
+                      <br/>
+                      <br/>
+                      <br/>
+                      <span class="bold">EY Comply DevOps Support team</span>
+                    </p>
+              addattachment: true
+              attachment: "$(configMapsZip)"
+            condition: and(eq(variables['Agent.JobStatus'], 'Succeeded'), or(eq(${{ parameters.qa33 }}, True), eq(${{ parameters.qa36 }}, True), eq(${{ parameters.qa37 }}, True), eq(${{ parameters.perftest }}, True), eq(${{ parameters.uat }}, True), eq(${{ parameters.production }}, True)))

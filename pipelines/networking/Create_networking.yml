@@ -1,0 +1,217 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: windows-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: Development
+  values:
+  - Development
+  - QA
+  - UAT
+  - Production
+
+- name: owner
+  displayName: "DevOps Owner"
+  type: string
+  default: EY_EYComply_Devops.GID@ey.net
+  values:
+  - EY_EYComply_Devops.GID@ey.net
+  - Gilberto.Graham@ey.com
+  - Maciej.Zukowski@gds.ey.com
+  - Marina.Perez.Cassiraga@gds.ey.com
+  - Nidhi.Chaudhary@gds.ey.com
+  - Octavio.Cesca@ey.com
+  - Srivalli.Ambati@gds.ey.com
+
+- name: location
+  displayName: "Location"
+  type: string
+  default: eastus
+
+- name: resourceGroupName
+  displayName: "Resource group name"
+  type: string
+
+- name: nonIpamVnet
+  displayName: "Deploy non-routable vnet? (Skip IPAM)"
+  type: boolean
+
+- name: nonIpamVnetName
+  displayName: "Vnet name (if it's already deployed)"
+  type: string
+  default: ' '
+
+- name: nonIpamVnetAddressSpace
+  displayName: "Address space for vnet (for example, 10.10.0.0/16)"
+  type: string
+  default: ' '
+
+- name: nonIpamSubnet
+  displayName: "Deploy non-routable subnet?"
+  type: boolean
+
+- name: nonIpamSubnetAddressSpace
+  displayName: "Address space for subnet (for example, 10.10.0.0/16)"
+  type: string
+  default: ' '
+
+- name: virtualNetwork
+  displayName: "Deploy routable vnet?"
+  type: boolean
+
+- name: ipamLocation
+  displayName: "IPAM location (ID for the vnet, example: west-europe01)"
+  type: string
+  default: ' '
+
+- name: ipRangeRegion
+  displayName: "IP range region"
+  type: string
+  default: "CoDev Americas VI"
+  values:
+  - "CoDev Americas"
+  - "CoDev Americas II"
+  - "CoDev Americas III"
+  - "CoDev Americas IV"
+  - "CoDev Americas V"
+  - "CoDev Americas VI"
+  - "CoDev Americas VII"
+  - "CoDev Americas VIII"
+  - "CoDev APAC"
+  - "CoDev APAC II"
+  - "CoDev APAC III"
+  - "CoDev EMEIA"
+  - "CoDev EMEIA II"
+  - "CoDev EMEIA III"
+  - "CoDev EMEIA IV"
+  - "CoDev EMEIA V"
+  - "CoDev EMEIA VI"
+  - "CoDev EMEIA VII"
+  - "CoDev EMEIA VIII"
+
+- name: vnetAddressSpace
+  displayName: "Vnet size"
+  type: string
+  default: "/24"
+  values:
+  - "/24"
+  - "/25"
+  - "/26"
+  - "/27"
+
+- name: subnet
+  displayName: "Create routable subnet? [Requires IPAM location of the vnet]"
+  type: boolean
+  default: false
+
+- name: subnetSize
+  displayName: "Subnet size"
+  type: string
+  default: "/24"
+  values:
+  - "/24"
+  - "/25"
+  - "/26"
+  - "/27"
+
+stages:
+- stage: Development
+  condition: eq('${{ parameters.environment }}', 'Development')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "Development"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      nonIpamVnet: "${{ parameters.nonIpamVnet }}"
+      nonIpamVnetName: "${{ parameters.nonIpamVnetName }}"
+      nonIpamVnetAddressSpace: "${{ parameters.nonIpamVnetAddressSpace }}"
+      nonIpamSubnet: "${{ parameters.nonIpamSubnet }}"
+      nonIpamSubnetAddressSpace: "${{ parameters.nonIpamSubnetAddressSpace }}"
+      virtualNetwork: "${{ parameters.virtualNetwork }}"
+      ipamLocation: "${{ parameters.ipamLocation }}"
+      ipRangeRegion: "${{ parameters.ipRangeRegion }}"
+      vnetAddressSpace: "${{ parameters.vnetAddressSpace }}"
+      subnet: "${{ parameters.subnet }}"
+      subnetSize: "${{ parameters.subnetSize }}"
+
+- stage: QA
+  condition: eq('${{ parameters.environment }}', 'QA')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "QA"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      nonIpamVnet: "${{ parameters.nonIpamVnet }}"
+      nonIpamVnetName: "${{ parameters.nonIpamVnetName }}"
+      nonIpamVnetAddressSpace: "${{ parameters.nonIpamVnetAddressSpace }}"
+      nonIpamSubnet: "${{ parameters.nonIpamSubnet }}"
+      nonIpamSubnetAddressSpace: "${{ parameters.nonIpamSubnetAddressSpace }}"
+      virtualNetwork: "${{ parameters.virtualNetwork }}"
+      ipamLocation: "${{ parameters.ipamLocation }}"
+      ipRangeRegion: "${{ parameters.ipRangeRegion }}"
+      vnetAddressSpace: "${{ parameters.vnetAddressSpace }}"
+      subnet: "${{ parameters.subnet }}"
+      subnetSize: "${{ parameters.subnetSize }}"
+
+- stage: UAT
+  condition: eq('${{ parameters.environment }}', 'UAT')
+  variables:
+  - template: ../../variables/infra-uat.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "UAT"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      nonIpamVnet: "${{ parameters.nonIpamVnet }}"
+      nonIpamVnetName: "${{ parameters.nonIpamVnetName }}"
+      nonIpamVnetAddressSpace: "${{ parameters.nonIpamVnetAddressSpace }}"
+      nonIpamSubnet: "${{ parameters.nonIpamSubnet }}"
+      nonIpamSubnetAddressSpace: "${{ parameters.nonIpamSubnetAddressSpace }}"
+      virtualNetwork: "${{ parameters.virtualNetwork }}"
+      ipamLocation: "${{ parameters.ipamLocation }}"
+      ipRangeRegion: "${{ parameters.ipRangeRegion }}"
+      vnetAddressSpace: "${{ parameters.vnetAddressSpace }}"
+      subnet: "${{ parameters.subnet }}"
+      subnetSize: "${{ parameters.subnetSize }}"
+
+- stage: Production
+  condition: eq('${{ parameters.environment }}', 'Production')
+  variables:
+  - template: ../../variables/infra-prod.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "Production"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      nonIpamVnet: "${{ parameters.nonIpamVnet }}"
+      nonIpamVnetName: "${{ parameters.nonIpamVnetName }}"
+      nonIpamVnetAddressSpace: "${{ parameters.nonIpamVnetAddressSpace }}"
+      nonIpamSubnet: "${{ parameters.nonIpamSubnet }}"
+      nonIpamSubnetAddressSpace: "${{ parameters.nonIpamSubnetAddressSpace }}"
+      virtualNetwork: "${{ parameters.virtualNetwork }}"
+      ipamLocation: "${{ parameters.ipamLocation }}"
+      ipRangeRegion: "${{ parameters.ipRangeRegion }}"
+      vnetAddressSpace: "${{ parameters.vnetAddressSpace }}"
+      subnet: "${{ parameters.subnet }}"
+      subnetSize: "${{ parameters.subnetSize }}"

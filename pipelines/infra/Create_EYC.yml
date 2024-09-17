@@ -1,0 +1,441 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: windows-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: Development
+  values:
+  - Development
+  - QA
+  - UAT
+  - Production
+  - DR
+
+- name: owner
+  displayName: "DevOps Owner"
+  type: string
+  default: EY_EYComply_Devops.GID@ey.net
+
+- name: location
+  displayName: "Location"
+  type: string
+  default: eastus
+
+- name: resourceGroup
+  displayName: "Deploy RG?"
+  type: boolean
+  default: false
+
+- name: resourceGroupName
+  displayName: "RG name (if it's already deployed)"
+  type: string
+  default: ' '
+
+- name: keyVault
+  displayName: "Deploy Key Vault?"
+  type: boolean
+  default: false
+
+- name: keyVaultName
+  displayName: "Name of Key Vault (if already deployed)"
+  type: string
+  default: ' '
+
+- name: networkSecurityGroup
+  displayName: "Deploy Network Security Group?"
+  type: boolean
+  default: false
+
+- name: vnetName
+  displayName: "Vnet name (for App Gateway)"
+  type: string
+  default: ' '
+
+- name: subnetName
+  displayName: "Subnet name (to attach to NSG/for Event Hub/for App Gateway)"
+  type: string
+  default: ' '
+
+- name: storageAccount
+  displayName: "Deploy Storage Account for client files?"
+  type: boolean
+  default: false
+
+- name: storageAccountName
+  displayName: "Name of Storage Account (if already deployed)"
+  type: string
+  default: ' '
+
+- name: storageAccountSqlmi
+  displayName: "Deploy Storage Account for SQL MI?"
+  type: boolean
+  default: false
+
+- name: storageAccountSqlmiName
+  displayName: "Name of Storage Account for SQL MI (if already deployed)"
+  type: string
+  default: ' '
+
+- name: recoveryServicesVault
+  displayName: "Deploy Recovery Services Vault?"
+  type: boolean
+  default: false
+
+- name: rsvName
+  displayName: "Name of Recovery Services Vault (if already deployed)"
+  type: string
+  default: ' '
+
+- name: redisCache
+  displayName: "Deploy Azure Cache for Redis?"
+  type: boolean
+  default: false
+
+- name: redisCacheName
+  displayName: "Name of Azure Cache for Redis (if already deployed)"
+  type: string
+  default: ' '
+
+- name: eventHub
+  displayName: "Deploy Event Hub namespace? (Requires subnet name)"
+  type: boolean
+  default: false
+
+- name: eventHubTopicsCreate
+  displayName: "Deploy Event Hub Topics (enable eventHub for new instance, or type eventHubNamespaceName to apply topics to existing instance)"
+  type: boolean
+  default: false
+
+- name: eventHubNamespaceName
+  displayName: "Name of Event Hub namespace - type to apply topics to existing instance - eventHubTopics must be enabled"
+  type: string
+  default: ' '
+
+- name: serviceBus
+  displayName: "Deploy Service Bus? (requires Key Vault Name)"
+  type: boolean
+  default: false
+
+- name: serviceBusName
+  displayName: "Name of Service Bus (if already deployed)"
+  type: string
+  default: ' '
+
+- name: serviceBusQueues
+  displayName: "Create Service Bus queues?"
+  type: boolean
+  default: false
+
+- name: serviceBusQueueList
+  displayName: "Queues to create in Service Bus"
+  type: object
+  default:
+  - queue1
+  - queue2
+
+- name: appServicePlan
+  displayName: "Deploy App Service Plan?"
+  type: boolean
+  default: false
+
+- name: appServicePlanName
+  displayName: "Name of App Service Plan (if already deployed)"
+  type: string
+  default: ' '
+
+- name: appInsights
+  displayName: "Deploy App Insights?"
+  type: boolean
+  default: false
+
+- name: appInsightsName
+  displayName: "Name of App Insights (if already deployed)"
+  type: string
+  default: ' '
+
+- name: functionApp
+  displayName: "Deploy Function App? (Requires App Service Plan name, App Insights name and Storage Account name)"
+  type: boolean
+  default: false
+
+- name: applicationGateway
+  displayName: "Deploy Application Gateway? (Requires vnet name and subnet name)"
+  type: boolean
+  default: false
+
+- name: appGatewayName
+  displayName: "App GW name (if it's already deployed)"
+  type: string
+  default: ' '
+
+- name: urlForAppGateway
+  displayName: "App GW - URL (just the hostname, not the full URL)"
+  type: string
+  default: ' '
+
+- name: backendAddress
+  displayName: "App GW - Backend Address (for example, webapp1.azurewebsites.net)"
+  type: string
+  default: ' '
+
+- name: wafPolicy
+  displayName: "Deploy WAF policy? (Requires App GW name)"
+  type: boolean
+  default: false
+
+- name: sqlmi
+  displayName: "Deploy SQL Managed Instance? (requires Storage Account name)"
+  type: boolean
+  default: false
+
+- name: sqlmiName
+  displayName: "SQL MI name (if it's already deployed)"
+  type: string
+  default: ' '
+
+- name: sqlmiSubnet
+  displayName: "SQL MI subnet name"
+  type: string
+  default: ' '
+
+stages:
+- stage: Development
+  condition: eq('${{ parameters.environment }}', 'Development')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "Development"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroup: "${{ parameters.resourceGroup }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      keyVault: "${{ parameters.keyVault }}"
+      keyVaultName: "${{ parameters.keyVaultName }}"
+      networkSecurityGroup: "${{ parameters.networkSecurityGroup }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      storageAccount: "${{ parameters.storageAccount }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      storageAccountSqlmi: "${{ parameters.storageAccountSqlmi }}"
+      storageAccountSqlmiName: "${{ parameters.storageAccountSqlmiName }}"
+      recoveryServicesVault: "${{ parameters.recoveryServicesVault }}"
+      rsvName: "${{ parameters.rsvName }}"
+      redisCache: "${{ parameters.redisCache }}"
+      redisCacheName: "${{ parameters.redisCacheName }}"
+      eventHub: "${{ parameters.eventHub }}"
+      eventHubTopicsCreate: "${{ parameters.eventHubTopicsCreate }}"
+      eventHubNamespaceName: "${{ parameters.eventHubNamespaceName }}"
+      serviceBus: "${{ parameters.serviceBus }}"
+      serviceBusName: "${{ parameters.serviceBusName }}"
+      serviceBusQueues: "${{ parameters.serviceBusQueues }}"
+      serviceBusQueueList: "${{ parameters.serviceBusQueueList }}"
+      appServicePlan: "${{ parameters.appServicePlan }}"
+      appServicePlanName: "${{ parameters.appServicePlanName }}"
+      appInsights: "${{ parameters.appInsights }}"
+      appInsightsName: "${{ parameters.appInsightsName }}"
+      functionApp: "${{ parameters.functionApp }}"
+      applicationGateway: "${{ parameters.applicationGateway }}"
+      appGatewayName: "${{ parameters.appGatewayName }}"
+      urlForAppGateway: "${{ parameters.urlForAppGateway }}"
+      backendAddress: "${{ parameters.backendAddress }}"
+      wafPolicy: "${{ parameters.wafPolicy }}"
+      sqlmi: "${{ parameters.sqlmi }}"
+      sqlmiName: "${{ parameters.sqlmiName }}"
+      sqlmiSubnet: "${{ parameters.sqlmiSubnet }}"
+
+- stage: QA
+  condition: eq('${{ parameters.environment }}', 'QA')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "QA"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroup: "${{ parameters.resourceGroup }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      keyVault: "${{ parameters.keyVault }}"
+      keyVaultName: "${{ parameters.keyVaultName }}"
+      networkSecurityGroup: "${{ parameters.networkSecurityGroup }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      storageAccount: "${{ parameters.storageAccount }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      storageAccountSqlmi: "${{ parameters.storageAccountSqlmi }}"
+      storageAccountSqlmiName: "${{ parameters.storageAccountSqlmiName }}"
+      recoveryServicesVault: "${{ parameters.recoveryServicesVault }}"
+      rsvName: "${{ parameters.rsvName }}"
+      redisCache: "${{ parameters.redisCache }}"
+      redisCacheName: "${{ parameters.redisCacheName }}"
+      eventHub: "${{ parameters.eventHub }}"
+      eventHubTopicsCreate: "${{ parameters.eventHubTopicsCreate }}"
+      eventHubNamespaceName: "${{ parameters.eventHubNamespaceName }}"
+      serviceBus: "${{ parameters.serviceBus }}"
+      serviceBusName: "${{ parameters.serviceBusName }}"
+      serviceBusQueues: "${{ parameters.serviceBusQueues }}"
+      serviceBusQueueList: "${{ parameters.serviceBusQueueList }}"
+      appServicePlan: "${{ parameters.appServicePlan }}"
+      appServicePlanName: "${{ parameters.appServicePlanName }}"
+      appInsights: "${{ parameters.appInsights }}"
+      appInsightsName: "${{ parameters.appInsightsName }}"
+      functionApp: "${{ parameters.functionApp }}"
+      applicationGateway: "${{ parameters.applicationGateway }}"
+      appGatewayName: "${{ parameters.appGatewayName }}"
+      urlForAppGateway: "${{ parameters.urlForAppGateway }}"
+      backendAddress: "${{ parameters.backendAddress }}"
+      wafPolicy: "${{ parameters.wafPolicy }}"
+      sqlmi: "${{ parameters.sqlmi }}"
+      sqlmiName: "${{ parameters.sqlmiName }}"
+      sqlmiSubnet: "${{ parameters.sqlmiSubnet }}"
+
+- stage: UAT
+  condition: eq('${{ parameters.environment }}', 'UAT')
+  variables:
+  - template: ../../variables/infra-uat.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "UAT"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroup: "${{ parameters.resourceGroup }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      keyVault: "${{ parameters.keyVault }}"
+      keyVaultName: "${{ parameters.keyVaultName }}"
+      networkSecurityGroup: "${{ parameters.networkSecurityGroup }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      storageAccount: "${{ parameters.storageAccount }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      storageAccountSqlmi: "${{ parameters.storageAccountSqlmi }}"
+      storageAccountSqlmiName: "${{ parameters.storageAccountSqlmiName }}"
+      recoveryServicesVault: "${{ parameters.recoveryServicesVault }}"
+      rsvName: "${{ parameters.rsvName }}"
+      redisCache: "${{ parameters.redisCache }}"
+      redisCacheName: "${{ parameters.redisCacheName }}"
+      eventHub: "${{ parameters.eventHub }}"
+      eventHubTopicsCreate: "${{ parameters.eventHubTopicsCreate }}"
+      eventHubNamespaceName: "${{ parameters.eventHubNamespaceName }}"
+      serviceBus: "${{ parameters.serviceBus }}"
+      serviceBusName: "${{ parameters.serviceBusName }}"
+      serviceBusQueues: "${{ parameters.serviceBusQueues }}"
+      serviceBusQueueList: "${{ parameters.serviceBusQueueList }}"
+      appServicePlan: "${{ parameters.appServicePlan }}"
+      appServicePlanName: "${{ parameters.appServicePlanName }}"
+      appInsights: "${{ parameters.appInsights }}"
+      appInsightsName: "${{ parameters.appInsightsName }}"
+      functionApp: "${{ parameters.functionApp }}"
+      applicationGateway: "${{ parameters.applicationGateway }}"
+      appGatewayName: "${{ parameters.appGatewayName }}"
+      urlForAppGateway: "${{ parameters.urlForAppGateway }}"
+      backendAddress: "${{ parameters.backendAddress }}"
+      wafPolicy: "${{ parameters.wafPolicy }}"
+      sqlmi: "${{ parameters.sqlmi }}"
+      sqlmiName: "${{ parameters.sqlmiName }}"
+      sqlmiSubnet: "${{ parameters.sqlmiSubnet }}"
+
+- stage: Production
+  condition: eq('${{ parameters.environment }}', 'Production')
+  variables:
+  - template: ../../variables/infra-prod.yml
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "Production"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroup: "${{ parameters.resourceGroup }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      keyVault: "${{ parameters.keyVault }}"
+      keyVaultName: "${{ parameters.keyVaultName }}"
+      networkSecurityGroup: "${{ parameters.networkSecurityGroup }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      storageAccount: "${{ parameters.storageAccount }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      storageAccountSqlmi: "${{ parameters.storageAccountSqlmi }}"
+      storageAccountSqlmiName: "${{ parameters.storageAccountSqlmiName }}"
+      recoveryServicesVault: "${{ parameters.recoveryServicesVault }}"
+      rsvName: "${{ parameters.rsvName }}"
+      redisCache: "${{ parameters.redisCache }}"
+      redisCacheName: "${{ parameters.redisCacheName }}"
+      eventHub: "${{ parameters.eventHub }}"
+      eventHubTopicsCreate: "${{ parameters.eventHubTopicsCreate }}"
+      eventHubNamespaceName: "${{ parameters.eventHubNamespaceName }}"
+      serviceBus: "${{ parameters.serviceBus }}"
+      serviceBusName: "${{ parameters.serviceBusName }}"
+      serviceBusQueues: "${{ parameters.serviceBusQueues }}"
+      serviceBusQueueList: "${{ parameters.serviceBusQueueList }}"
+      appServicePlan: "${{ parameters.appServicePlan }}"
+      appServicePlanName: "${{ parameters.appServicePlanName }}"
+      appInsights: "${{ parameters.appInsights }}"
+      appInsightsName: "${{ parameters.appInsightsName }}"
+      functionApp: "${{ parameters.functionApp }}"
+      applicationGateway: "${{ parameters.applicationGateway }}"
+      appGatewayName: "${{ parameters.appGatewayName }}"
+      urlForAppGateway: "${{ parameters.urlForAppGateway }}"
+      backendAddress: "${{ parameters.backendAddress }}"
+      wafPolicy: "${{ parameters.wafPolicy }}"
+      sqlmi: "${{ parameters.sqlmi }}"
+      sqlmiName: "${{ parameters.sqlmiName }}"
+      sqlmiSubnet: "${{ parameters.sqlmiSubnet }}"
+
+- stage: DR
+  condition: eq('${{ parameters.environment }}', 'DR')
+  variables:
+  - template: ../../variables/infra-dr.yml
+  - group: 'eyc-prod-dr-variables'
+  jobs:
+  - template: templates/deploy-resources.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "DR"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      resourceGroup: "${{ parameters.resourceGroup }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      keyVault: "${{ parameters.keyVault }}"
+      keyVaultName: "${{ parameters.keyVaultName }}"
+      networkSecurityGroup: "${{ parameters.networkSecurityGroup }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      storageAccount: "${{ parameters.storageAccount }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      storageAccountSqlmi: "${{ parameters.storageAccountSqlmi }}"
+      storageAccountSqlmiName: "${{ parameters.storageAccountSqlmiName }}"
+      recoveryServicesVault: "${{ parameters.recoveryServicesVault }}"
+      rsvName: "${{ parameters.rsvName }}"
+      redisCache: "${{ parameters.redisCache }}"
+      redisCacheName: "${{ parameters.redisCacheName }}"
+      eventHub: "${{ parameters.eventHub }}"
+      eventHubTopicsCreate: "${{ parameters.eventHubTopicsCreate }}"
+      eventHubNamespaceName: "${{ parameters.eventHubNamespaceName }}"
+      serviceBus: "${{ parameters.serviceBus }}"
+      serviceBusName: "${{ parameters.serviceBusName }}"
+      serviceBusQueues: "${{ parameters.serviceBusQueues }}"
+      serviceBusQueueList: "${{ parameters.serviceBusQueueList }}"
+      appServicePlan: "${{ parameters.appServicePlan }}"
+      appServicePlanName: "${{ parameters.appServicePlanName }}"
+      appInsights: "${{ parameters.appInsights }}"
+      appInsightsName: "${{ parameters.appInsightsName }}"
+      functionApp: "${{ parameters.functionApp }}"
+      applicationGateway: "${{ parameters.applicationGateway }}"
+      appGatewayName: "${{ parameters.appGatewayName }}"
+      urlForAppGateway: "${{ parameters.urlForAppGateway }}"
+      backendAddress: "${{ parameters.backendAddress }}"
+      wafPolicy: "${{ parameters.wafPolicy }}"
+      sqlmi: "${{ parameters.sqlmi }}"
+      sqlmiName: "${{ parameters.sqlmiName }}"
+      sqlmiSubnet: "${{ parameters.sqlmiSubnet }}"

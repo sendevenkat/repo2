@@ -1,0 +1,156 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: NONPROD
+    values:
+    - NONPROD
+    - UAT
+    - PROD
+
+  - name: Maintenancepage
+    displayName: "Maintenance Page"
+    type: string
+    default: Disable
+    values:
+      - Enable
+      - Disable
+
+variables: 
+- template: ../../../variables/subscriptions.yml
+- template: ../../../variables/resource-groups.yml
+- name: resourceGroupName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'USEDEYC003RSG04'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'USEPEYC002RSG04'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'USEPEYC002RSG04'
+
+- name: gatewayName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'USEDEYC003AAG04'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'USEUEYC002AAG01'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'USEPEYC002AAG03'
+
+- name: pathMapName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'HTTPs'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'HTTPs'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'HTTPs'
+
+- name: pathRuleName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'devKaasCluster'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'uatKaasCluster'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'prodKaasCluster'
+
+- name: backendPoolName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'dev-backendpool'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'maintenancePage'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'maintenancePage'
+
+- name: backendHttpSettingsName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'dev-backendsettings'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'Maintenance-BS'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'Maintenance-BS'
+    
+- name: originalbackendPoolName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'devKaasCluster'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'uatKaasCluster'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'prodKaasCluster'
+
+- name: originalbackendHttpSettingsName
+  ${{ if eq(parameters.environment, 'NONPROD') }}:
+    value: 'devKaasClusterSettings'
+  ${{ if eq(parameters.environment, 'UAT') }}:
+    value: 'uatKaasClusterSettings'
+  ${{ if eq(parameters.environment, 'PROD') }}:
+    value: 'prodKaasClusterSettings'
+
+
+steps:
+- task: AzurePowerShell@5
+  displayName: 'Enable Maintenance Page for Non Prod'
+  inputs:
+    azureSubscription: 'EYComply Non-Prod'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(Build.SourcesDirectory)/pipelines/Ad-Hoc-Automation-Pipelines/Maintenance-Page-AppGwy/scripts/Maintenance.ps1'
+    ScriptArguments: > 
+        -resourceGroupName ${{ variables.resourceGroupName }} 
+        -gatewayName ${{ variables.gatewayName }}  
+        -pathMapName ${{ variables.pathMapName }}
+        -pathRuleName ${{ variables.pathRuleName }}
+        -backendPoolName ${{ variables.backendPoolName }}
+        -backendHttpSettingsName  ${{ variables.backendHttpSettingsName }}
+    azurePowerShellVersion: 'LatestVersion'
+  condition: and(eq('${{ parameters.environment }}', 'NONPROD'), eq('${{ parameters.Maintenancepage }}', 'Enable'))
+
+- task: AzurePowerShell@5
+  displayName: 'Enable Maintenance Page for PROD'
+  inputs:
+    azureSubscription: 'EYComply Production'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(Build.SourcesDirectory)/pipelines/Ad-Hoc-Automation-Pipelines/Maintenance-Page-AppGwy/scripts/Maintenance.ps1'
+    ScriptArguments: > 
+        -resourceGroupName ${{ variables.resourceGroupName }} 
+        -gatewayName ${{ variables.gatewayName }}  
+        -pathMapName ${{ variables.pathMapName }}
+        -pathRuleName ${{ variables.pathRuleName }}
+        -backendPoolName ${{ variables.backendPoolName }}
+        -backendHttpSettingsName  ${{ variables.backendHttpSettingsName }}
+    azurePowerShellVersion: 'LatestVersion'
+  condition: and(ne('${{ parameters.environment }}', 'NONPROD'), eq('${{ parameters.Maintenancepage }}', 'Enable'))
+
+- task: AzurePowerShell@5
+  displayName: 'Disable Maintenance Page for Non PROD'
+  inputs:
+    azureSubscription: 'EYComply Non-Prod'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(Build.SourcesDirectory)/pipelines/Ad-Hoc-Automation-Pipelines/Maintenance-Page-AppGwy/scripts/Maintenance.ps1'
+    ScriptArguments: > 
+        -resourceGroupName ${{ variables.resourceGroupName }} 
+        -gatewayName ${{ variables.gatewayName }}  
+        -pathMapName ${{ variables.pathMapName }}
+        -pathRuleName ${{ variables.pathRuleName }}
+        -backendPoolName ${{ variables.originalbackendPoolName }}
+        -backendHttpSettingsName  ${{ variables.originalbackendHttpSettingsName }}
+    azurePowerShellVersion: 'LatestVersion'
+  condition: and(eq('${{ parameters.environment }}', 'NONPROD'), eq('${{ parameters.Maintenancepage }}', 'Disable'))
+
+- task: AzurePowerShell@5
+  displayName: 'Disable Maintenance Page for PROD'
+  inputs:
+    azureSubscription: 'EYComply Production'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(Build.SourcesDirectory)/pipelines/Ad-Hoc-Automation-Pipelines/Maintenance-Page-AppGwy/scripts/Maintenance.ps1'
+    ScriptArguments: > 
+        -resourceGroupName ${{ variables.resourceGroupName }} 
+        -gatewayName ${{ variables.gatewayName }}  
+        -pathMapName ${{ variables.pathMapName }}
+        -pathRuleName ${{ variables.pathRuleName }}
+        -backendPoolName ${{ variables.originalbackendPoolName }}
+        -backendHttpSettingsName  ${{ variables.originalbackendHttpSettingsName }}
+    azurePowerShellVersion: 'LatestVersion'
+  condition: and(ne('${{ parameters.environment }}', 'NONPROD'), eq('${{ parameters.Maintenancepage }}', 'Disable'))

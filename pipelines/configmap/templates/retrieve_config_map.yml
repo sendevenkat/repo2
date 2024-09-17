@@ -1,0 +1,70 @@
+parameters:
+- name: environment
+  type: string
+
+- name: serviceConnection
+  type: string
+
+- name: subscriptionId
+  type: string
+
+
+
+steps:
+- task: PowerShell@2
+  displayName: "Select ${{ parameters.environment }} variables"
+  inputs:
+    targetType: inline
+    pwsh: true
+    script: |
+      $environment = '${{ parameters.environment }}';
+      Write-Host ("##vso[task.setvariable variable=environment]$environment");
+
+      $repository = '$(${{ parameters.environment }}Repository)';
+      Write-Host ("##vso[task.setvariable variable=repository]$repository");
+
+      $fileName = '$(${{ parameters.environment }}FileName)';
+      Write-Host ("##vso[task.setvariable variable=fileName]$fileName");
+
+      $resourceGroup = '$(${{ parameters.environment }}ResourceGroup)';
+      Write-Host ("##vso[task.setvariable variable=resourceGroup]$resourceGroup");
+
+      $keyVault = '$(${{ parameters.environment }}KeyVault)';
+      Write-Host ("##vso[task.setvariable variable=keyVault]$keyVault");
+
+- task: AzurePowerShell@5
+  displayName: "Retrieve and Replace credentials from ${{ parameters.environment }} Key Vault"
+  inputs:
+    connectedServiceNameARM: "${{ parameters.serviceConnection }}"
+    subscriptionName: "${{ parameters.subscriptionId }}"
+    azurePowerShellVersion: LatestVersion
+    ScriptType: InlineScript
+    inline: |
+        $filePath = "$(System.DefaultWorkingDirectory)/$(repository)/$(fileName)";
+        $keyVault = "$(keyVault)";
+
+        $contents = Get-Content -Path $filePath;
+
+        Get-AzKeyVaultSecret -VaultName $keyVault | ForEach-Object { 
+          $name = $_.Name;
+          $value = Get-AzKeyVaultSecret -VaultName $keyVault -Name $name -AsPlainText;
+
+          $contents = $contents -replace ("=" + $name + "$"), ("=" + $value);
+        }
+
+        Set-Content -Path $filePath -Value $contents;
+
+- task: PowerShell@2
+  displayName: "Moving ${{ parameters.environment }} Config Map to destination folder"
+  inputs:
+    targetType: inline
+    pwsh: true
+    script: |
+        $filePath = "$(System.DefaultWorkingDirectory)/$(repository)/$(fileName)";
+        $destinationFolder = "$(destinationFolder)";
+
+        if ((Test-Path -Path $destinationFolder) -eq $false) {
+          New-Item -ItemType Directory -Path $destinationFolder;
+        }
+
+        Move-Item -Path $filePath -Destination $destinationFolder;

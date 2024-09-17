@@ -1,0 +1,22 @@
+FROM eyctpeu-eycomply-docker-dev-eu.jfrog.io/eycomply-extraction-module-fr
+USER root
+RUN apt-get install netcat -y
+RUN apt-get -y install cron
+RUN chgrp frpdfextraction-service /usr/bin/crontab
+RUN chmod 777 /usr/bin/crontab
+RUN chmod 777 -R /var/spool/cron
+RUN chmod 777 /var/spool/cron/*
+RUN chmod 777 /var/run/
+RUN chmod u+s /usr/sbin/cron
+RUN chown frpdfextraction-service:frpdfextraction-service /var/run/
+
+RUN adduser python
+
+RUN find / -name /etc/cron.allow
+
+RUN cat script.sh
+
+RUN chown frpdfextraction-service:frpdfextraction-service script.sh
+USER frpdfextraction-service
+ENTRYPOINT ["/bin/bash","script.sh"]
+EXPOSE {{DOCKER_PORT}}

@@ -1,0 +1,67 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environment
+    displayName: "Select Target Environment"
+    type: string
+    default: "Dev"
+    values:
+      - Dev
+      - QA
+      - UAT
+      - Prod
+
+  - name: publicImageRegistry
+    displayName: "Docker Registry"
+    type: string
+    default: "docker.io/library"
+
+  - name: publicImage
+    displayName: "Docker Image (with Tag)"
+    type: string
+
+  - name: targetImage
+    displayName: "Target Image Name"
+    type: string
+    default: "eyc"
+
+  - name: targetImageTag
+    displayName: "Target Image Tag"
+    type: string
+    default: "$(Build.BuildNumber)"
+
+variables:
+  - name: DOCKER_BUILDKIT
+    value: 1
+  - name: jfrogRegistry
+    value: "eyctpeu-eycomply-docker-${{ lower(parameters.environment) }}-eu.jfrog.io"
+  - name: jfrogRepository
+    ${{ if or(eq(parameters.environment, 'dev'), eq(parameters.environment, 'qa')) }}:
+      value: "eycomply-docker-dev-eu"
+    ${{ if eq(parameters.environment, 'uat') }}:
+      value: "eycomply-docker-uat-eu"
+    ${{ if eq(parameters.environment, 'prod') }}:
+      value: "eycomply-docker-prod-eu"
+  - name: env_class
+    ${{ if or(eq(parameters.environment, 'dev'), eq(parameters.environment, 'qa')) }}:
+      value: "dev"
+    ${{ else }}:
+      value: "{{ lower(parameters.environment) }}"
+
+stages:
+  - stage: "${{ parameters.environment }}"
+    displayName: "Push Image to ${{ parameters.environment }}"
+    jobs:
+      - template: templates/deploy_image.yml
+        parameters:
+          stageName: "${{ parameters.environment }}"
+          jfrogRegistry: $(jfrogRegistry)
+          publicImageRegistry: ${{ parameters.publicImageRegistry }}
+          publicImage: ${{ parameters.publicImage }}
+          tagetRepo: $(jfrogRepository)
+          targetImage: ${{ parameters.targetImage }}
+          targetImageTag: ${{ parameters.targetImageTag }}

@@ -1,0 +1,7 @@
+FROM eyctpeu-eycomply-docker-dev-eu.jfrog.io/fry9c-dataload-module
+
+USER fry9cdataload-service
+
+CMD ["python", "FRY9C_Historical_Load.py"]
+#CMD ["bash", "-c", "while true; do echo 'Running...'; sleep 60; done"]
+EXPOSE {{DOCKER_PORT}}

@@ -1,0 +1,32 @@
+trigger:
+  branches:
+    include:
+    - master
+    - release/r1
+pr: none
+variables: 
+  RESOURCEGROUP: 'USEPEYC002RSG04'
+
+parameters: 
+  - name: STORAGE_ACCOUNT
+    displayName: "STORAGE_ACCOUNT"
+    type: string
+    values:
+    - usepeyc2stags01
+    - usepeyc002sta02
+    - usepeyc2statrp01
+    - usepeyc002sta0b
+pool:
+  name: Azure Pipelines
+  vmImage: 'ubuntu-latest'
+steps:
+- task: AzureCLI@2
+  displayName: 'Azure CLI '
+  inputs:
+    azureSubscription: 'EYComply Production'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+     az storage account network-rule add -g $(RESOURCEGROUP) -n ${{ parameters.STORAGE_ACCOUNT }} --ip-address 165.225.124.95
+    addSpnToEnvironment: true
+    useGlobalConfig: true

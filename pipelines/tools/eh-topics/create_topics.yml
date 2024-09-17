@@ -1,0 +1,61 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: serviceConnection
+  displayName: "Service connection:"
+  type: string
+  default: "EYC-Non-Prod-Subscription"
+  values:
+  - "EYC-Non-Prod-Subscription"
+  - "EY Comply Prod"
+
+- name: eventHubInstance
+  displayName: "Event Hub instance:"
+  type: string
+
+- name: resourceGroupName
+  displayName: "RG name:"
+  type: string
+ 
+- name: partitionCount
+  displayName: "Partition Count:"
+  type: number
+
+- name: topicList
+  displayName: "Topics to create in Event Hub (maximum 10):"
+  type: object
+  default:
+  - topic1
+  - topic2
+  - topic3
+  - topic4
+  - topic5
+  - topic6
+  - topic7
+  - topic8
+  - topic9
+  - topic10
+
+steps:
+- checkout: self
+
+- ${{ each topic in parameters.topicList }}:
+  - task: AzureCLI@2
+    displayName: "Create topic: ${{ topic }}"
+    inputs:
+      azureSubscription: "${{ parameters.serviceConnection }}"
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az eventhubs eventhub create \
+        --resource-group "${{ parameters.resourceGroupName }}" \
+        --namespace-name "${{ parameters.eventHubInstance }}" \
+        --name ${{ topic }} \
+        --message-retention 2 \
+        --partition-count ${{ parameters.partitionCount }} \
+        --status Active \
+        --enable-capture false

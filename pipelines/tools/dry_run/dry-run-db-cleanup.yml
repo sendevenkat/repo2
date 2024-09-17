@@ -1,0 +1,56 @@
+trigger:
+- none  
+
+pr: none
+
+pool:
+  vmImage: 'windows-latest'
+
+schedules:
+- cron: '0 12 * * 3'
+  displayName: Weekly Wednesday 12 PM build
+  branches:
+    include:
+    - feature-601595-dry-run-db-cleanup
+
+stages:
+- stage: CleanUp_DryRunDB
+  jobs:
+  - job: Clean_DBDryRun
+    variables:
+      - template: ../../../variables/dry-run.yml  # Import variables from variables.yml
+    steps:
+    - task: AzureKeyVault@2
+      displayName: 'Get secrets from Key Vault'
+      inputs:
+        azureSubscription: 'EYComply Production'
+        KeyVaultName: $(targetKeyVault)
+        SecretsFilter: 'DRY-RUN-SQL-USER,DRY-RUN-SQL-PWD'
+        RunAsPreJob: true
+      
+
+    - task: SqlAzureDacpacDeployment@1
+      displayName: 'Drop databases older than 7 days'
+      inputs:
+        azureSubscription: 'EYComply Production'
+        AuthenticationType: 'server'
+        ServerName: '$(targetDBServer)'
+        DatabaseName: 'master'
+        SqlUsername: '$(DRY-RUN-SQL-USER)'
+        SqlPassword: '$(DRY-RUN-SQL-PWD)'
+        deployType: 'InlineSqlTask'
+        SqlInline: |
+          USE master
+          GO
+          DECLARE @SevenDaysAgo DATETIME
+          DECLARE @SqlStatements NVARCHAR(MAX) = ''
+          
+          SET @SevenDaysAgo = DATEADD(DAY, -7, GETDATE())
+          
+          SELECT @SqlStatements = @SqlStatements + 'DROP DATABASE [' + name + '];' + CHAR(13)
+          FROM sys.databases
+          WHERE state_desc = 'ONLINE'  -- Consider only online databases
+              AND create_date < @SevenDaysAgo and name not in ('master','tempdb','model','msdb','Statistics_DB')
+          Select @SqlStatements
+          EXEC sp_executesql @SqlStatements
+        IpDetectionMethod: 'AutoDetect'

@@ -1,0 +1,9 @@
+version: '3'
+services:
+  eycomply-app:
+    image: eycomplynonprod.azurecr.io/eyc2/microservices/${MICROSVC}:${TAG}
+    build:
+      dockerfile: ${DOCKERFILE}
+      context: .
+    ports:
+      - "4080:8080"

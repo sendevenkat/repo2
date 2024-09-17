@@ -1,0 +1,119 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+# add scheduler for this pipeline on sunday and wednesday at 9:00 AM India time
+schedules:
+- cron: "0 3 * * 0,3"
+  displayName: "Every Sunday and Wednesday at 9:00 AM IST"
+  branches:
+    include:
+    - master
+  always: true
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: prod
+    values:
+    - qa33
+    - qa36
+    - qa37
+    - qabcm
+    - perftest
+    - uat
+    - prod
+    - prod-dr
+
+variables:
+- template: ../../../variables/clusters.yml
+- template: ../../../variables/resource-groups.yml
+- template: ../../../variables/subscriptions.yml
+- template: ../../../variables/repos.yml
+
+- name: var_namespace
+  ${{ if eq(parameters['environment'], 'qabcm')}}:
+    value: "bcm"
+  ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    value: "eycomply"
+  ${{ elseif eq(parameters['environment'], 'prod-dr') }}:
+    value: "prod-dr"
+  ${{ else }}:
+    value: "${{ parameters.environment }}"
+- name: file_name
+  ${{ if startsWith(parameters['environment'], 'qa33')}}:
+    value: "qa33-release-notes.csv"
+  ${{ elseif startsWith(parameters['environment'], 'qa36')}}:
+    value: "qa36-release-notes.csv"
+  ${{ elseif startsWith(parameters['environment'], 'qa37')}}:
+    value: "qa37-release-notes.csv"
+  ${{ elseif startsWith(parameters['environment'], 'qabcm')}}:
+    value: "qabcm-release-notes.csv"
+  ${{ elseif startsWith(parameters['environment'], 'perftest')}}:
+    value: "perftest-release-notes.csv"
+  ${{ elseif eq(parameters['environment'], 'prod-dr')}}:
+    value: "prod-dr-release-notes.csv"
+  ${{ elseif eq(parameters['environment'], 'uat')}}:
+    value: "uat-release-notes.csv"
+  ${{ else }}:
+    value: "prod-release-notes.csv"
+
+
+steps:
+- checkout: self
+
+- task: AzureCLI@2
+  displayName: 'Release Notes for  ${{ parameters.environment }}'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+      az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+
+      output_file=$(Build.SourcesDirectory)/$(file_name)
+      echo "microservice,artifact,Artifact_version,environment,source_branch,commit,Queued_by,timestamp" > $output_file
+      exclude_microservices=("clamavservice" "audituiservice" "dlqprocessoruiservice" "zipkinservice" "frpdfextractionservice" "trackeruiservice")
+      microservices=($(kubectl get pods -n $(var_namespace) -l env=${{ parameters.environment }} -o=jsonpath='{range .items[*]}{@.metadata.labels.app}{"\n"}{end}' | sort -u))
+      for microservice in "${microservices[@]}"; do
+        exclude=false
+        for excluded_microservice in "${exclude_microservices[@]}"; do
+          if [[ "$microservice" == *"$excluded_microservice"* ]]; then
+            exclude=true
+            break
+          fi
+        done
+        if [ "$exclude" = true ]; then
+        echo "########## NOT INCLUDED MICROSERVICE $microservice ##########"
+        continue
+        fi
+
+        echo "Processing microservice: $microservice"
+        artifact_version=$(kubectl exec -n $(var_namespace) -i  $(kubectl get pods -n $(var_namespace) -l app="$microservice" --field-selector=status.phase=Running -o=jsonpath='{.items[0].metadata.name}' 2>/dev/null) -- cat environment.var | awk -F': ' 'BEGIN {OFS=","} /^$/{if (NR>1) print microservice, "artifact", artifact, environment, source_branch, commit, queued_by, time; if (source_branch) exit; microservice=source_branch=artifact=environment=commit=queued_by=time=""} /Microservice/{microservice=$2} /Source branch name/{if (!source_branch) source_branch=$2} /Environment/{environment=$2} /Artifact version/{artifact=$2} /Commit is/{commit=$2} /Queued by/{queued_by=$2} /Time/{time=$0; match(time, /[0-9]+:[0-9]+:[0-9]+ UTC [0-9]+/); time=substr(time, RSTART, RLENGTH)} END {if (NR>1) print microservice, "artifact", artifact, environment, source_branch, commit, queued_by, time}' | tr -cd '[:print:]' | tr -d '[[:blank:]]')
+        echo $artifact_version >> $output_file
+        
+       done
+
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+  enabled: true
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.SourcesDirectory)/$(file_name)'
+    ArtifactName: 'ReleaseArtifact'
+    publishLocation: 'Container'
+  enabled: true
+          
+- script: |
+    az pipelines runs tag add --organization $(System.TeamFoundationCollectionUri) --project $(System.TeamProjectId) --run-id $(Build.BuildId) --tag "Environment- ${{ parameters.environment }} "
+  displayName: 'Tag pipeline run'
+  env:
+    AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+  condition: succeededOrFailed()
+
+
+  

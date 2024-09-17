@@ -1,0 +1,268 @@
+parameters:
+- name: environment
+  type: string
+- name: microservice
+  type: string
+- name: branch_artifact_selector
+  type: string
+- name: branch_artifact_value
+  type: string  
+
+jobs:
+- job: BuildApp
+  steps:
+
+  - script: |
+      echo "##vso[task.setvariable variable=BRANCH_ARTIFACT_VALUE_PARSED]$(echo ${{ parameters.branch_artifact_value }} |tr -cd '[:print:]' |tr -d '[[:blank:]]')"
+    displayName: 'Clean up input string'
+
+  - task: TriggerBuild@3
+    displayName: 'Build Artifact'
+    inputs:
+      definitionIsInCurrentTeamProject: true
+      buildDefinition: 'backend-build-fry9c'
+      queueBuildForUserThatTriggeredBuild: true
+      ignoreSslCertificateErrors: false
+      useSameSourceVersion: false
+      useCustomSourceVersion: false
+      useSameBranch: false
+      branchToUse: '$(BRANCH_ARTIFACT_VALUE_PARSED)'
+      waitForQueuedBuildsToFinish: true
+      storeInEnvironmentVariable: true
+      authenticationMethod: 'OAuth Token'
+      password: '$(System.AccessToken)'
+      enableBuildInQueueCondition: false
+      dependentOnSuccessfulBuildCondition: false
+      dependentOnFailedBuildCondition: false
+      checkbuildsoncurrentbranch: false
+      failTaskIfConditionsAreNotFulfilled: false
+    condition: and(succeeded(), eq('${{ parameters.branch_artifact_selector }}', 'branch'))
+    enabled: true
+
+  - script: |
+      if [[ ${{ parameters.branch_artifact_selector }} == 'artifact' ]]
+      then
+        echo "##vso[task.setvariable variable=ARTIFACT_NAME]${{ parameters.microservice }}-$(BRANCH_ARTIFACT_VALUE_PARSED).zip"
+      else
+        echo "##vso[task.setvariable variable=ARTIFACT_NAME]"*""      
+      fi
+    displayName: 'Set ARTIFACT_NAME'
+    
+  - script: |
+      cd $(Build.SourcesDirectory)
+      mkdir -p dockerdir/dist
+    displayName: 'Prepare directory for container files'
+
+  - ${{ if notin(parameters.microservice, 'camundawrapper') }}:
+    - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-generic-download.ArtifactoryGenericDownload@3
+      displayName: 'Download Artifacts from jFrog Artifactory - Gradle'
+      inputs:
+        connection: 'EYC jFrog Artifactory - Gradle'
+        fileSpec: |
+          {
+            "files": [
+              {
+                "pattern": "eycomply-gradle-dev-eu/${{ parameters.microservice }}-service/$(ARTIFACT_NAME)",
+                "target": "$(Build.SourcesDirectory)/dockerdir/",
+                "sortBy": ["created"],
+                "sortOrder": "desc",
+                "limit": 1,
+                "flat": "true"            
+              }
+            ]
+          }
+        insecureTls: true
+        splitCount: 0
+      condition: and(succeeded(), not(in('${{ parameters.microservice }}', 'fry9cdataload')))
+  
+  - ${{ else }}:
+    - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-generic-download.ArtifactoryGenericDownload@3
+      displayName: 'Download Artifacts from jFrog Artifactory - Maven'
+      inputs:
+        connection: 'EYC jFrog Artifactory - Maven'
+        fileSpec: |
+          {
+            "files": [
+              {
+                "pattern": "eycomply-maven-dev-eu/${{ parameters.microservice }}-service/$(ARTIFACT_NAME)",
+                "target": "$(Build.SourcesDirectory)/dockerdir/",
+                "sortBy": ["created"],
+                "sortOrder": "desc",
+                "limit": 1,
+                "flat": "true" 
+              }
+            ]
+          }
+        insecureTls: true
+        splitCount: 0
+
+  - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-generic-download.ArtifactoryGenericDownload@3
+    displayName: 'Download required packages from Artifactory'
+    inputs:
+      connection: 'EYC jFrog Artifactory - Gradle'
+      fileSpec: |
+        {
+          "files": [
+            {
+              "pattern": "eycomply-gradle-staging-eu/sourcefilesdockerbuildeyc2.zip",
+              "target": "$(Build.SourcesDirectory)/dockerdir/",
+              "explode": "true"
+            }
+          ]
+        }
+      insecureTls: true
+      splitCount: 0
+
+  - script: |
+      cd $(Build.SourcesDirectory)/dockerdir/
+      ARTIFACT_FILE_NAME=`basename *.zip`
+      unzip $ARTIFACT_FILE_NAME
+      echo "##vso[task.setvariable variable=ARTIFACT_FILE_NAME]$ARTIFACT_FILE_NAME"
+      echo ARTIFACT_FILE_NAME is $ARTIFACT_FILE_NAME
+    displayName: 'Extract artifact and set ARTIFACT_FILE_NAME'
+
+  - script: |
+      cd $(Build.SourcesDirectory)/dockerdir/
+      BUILD_FILE_NAME=`basename *.jar`
+      echo "##vso[task.setvariable variable=BUILD_FILE_NAME]$BUILD_FILE_NAME"
+      echo BUILD_FILE_NAME is $BUILD_FILE_NAME
+    displayName: 'Set BUILD_FILE_NAME'
+
+  - script: |
+      set -x
+      echo "##vso[task.setvariable variable=ARTIFACT_VERSION]$(echo $(ARTIFACT_FILE_NAME) |cut -d- -f2 |rev |cut -c5- |rev)"
+    displayName: 'Set ARTIFACT_VERSION'
+
+  - script: |
+      sed -i "s|{{ENV}}|${{ parameters.environment }}|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{JAVA_HOME_DOCKER}}|$(JAVA_HOME_DOCKER)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{CATALINA_HOME}}|$(CATALINA_HOME)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{BUILD_FILE_NAME}}|$(BUILD_FILE_NAME)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{DOCKER_BASE_IMAGE}}|$(DOCKER_BASE_IMAGE)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./pipelines/backend/Dockerfile
+      sed -i "s|{{RSA_ID}}|$(ey-ctp_eycomply-configurations)|g" ./pipelines/backend/Dockerfile
+
+      cat ./pipelines/backend/Dockerfile
+    displayName: 'Prepare Dockerfile'
+
+  - script: |
+      cp ./pipelines/backend/Dockerfile $(Build.SourcesDirectory)/dockerdir/
+      cp ./pipelines/backend/docker-compose.yml $(Build.SourcesDirectory)/dockerdir/
+    displayName: 'Copy files to dockerdir'
+  
+  - ${{ if in(parameters.microservice, 'fry9cdataload') }}:
+    - script: |
+        sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./pipelines/tools/fry9cdataload/Dockerfile.fry9cdataload
+        cat ./pipelines/tools/${{ parameters.microservice }}/Dockerfile*
+        cp ./pipelines/tools/fry9cdataload/Dockerfile.fry9cdataload $(Build.SourcesDirectory)/dockerdir/Dockerfile
+        echo "./pipelines/tools/${{ parameters.microservice }}/Dockerfile.${{ parameters.microservice }}"
+        cp ./pipelines/tools/fry9cdataload/docker-compose.fry9cdataload.yml $(Build.SourcesDirectory)/dockerdir/docker-compose.yml
+        echo "../pipelines/tools/${{ parameters.microservice }}/docker-compose.${{ parameters.microservice }}.yml"
+      displayName: 'Setup custom ${{ parameters.microservice }} service'
+
+  - script: |
+      cd $(Build.SourcesDirectory)/dockerdir
+      echo '-----------------------------------------------------------------'
+      echo CATALINA_HOME is: $(CATALINA_HOME)
+      echo JAVA_HOME_DOCKER is: $(JAVA_HOME_DOCKER)
+      echo '-----------------------------------------------------------------'
+      echo Build.SourcesDirectory is in $(Build.SourcesDirectory) and the files in there are:
+      ls $(Build.SourcesDirectory)
+      echo
+      echo '------------------------RELEASE DETAILS--------------------------' |tee -a environment.var
+      echo 'Artifact version is: '$(ARTIFACT_VERSION) |tee -a environment.var
+      echo 'Microservice is: '${{ parameters.microservice }} |tee -a environment.var
+      echo 'Environment is: '${{ parameters.environment }} |tee -a environment.var
+      echo 'BuildId: '$(Build.BuildId)
+      echo 'Build.BuildNumber: '$(Build.BuildNumber)
+      echo 'Build.DefinitionVersion: '$(Build.DefinitionVersion)
+      echo 'Queued by: '"$(Build.QueuedBy)" |tee -a environment.var
+      echo 'Time: '$(date) |tee -a environment.var      
+      echo 'Build was: '$(Build.Reason)
+
+      cat build.var |tee -a environment.var
+
+      echo '------------------------DevOps DETAILS---------------------------' |tee -a environment.var
+      echo 'Repository is on: '$(Build.Repository.Provider) |tee -a environment.var
+      echo 'Repository URL is: '$(Build.Repository.Uri) |tee -a environment.var
+      echo 'Source branch is: '$(Build.SourceBranch)
+      echo 'Source branch name is: '$(Build.SourceBranchName) |tee -a environment.var
+      echo 'Commit is: ''$(Build.SourceVersion)' |tee -a environment.var
+      echo 'Commit message was: ''$(Build.SourceVersionMessage)' |tee -a environment.var
+      echo 'BUILD_FILE_NAME is: '$(BUILD_FILE_NAME) |tee -a environment.var
+      echo 'ARTIFACT_FILE_NAME is: '$(ARTIFACT_FILE_NAME)
+      echo 'Docker Image generated on: '$(date) |tee -a environment.var
+      echo 'Docker Image is: '$(DOCKER_IMAGE_PATH) |tee -a environment.var
+      echo
+
+      echo $(ARTIFACT_VERSION) > ARTIFACT_VERSION.var
+
+      echo ARTIFACT_VERSION.var file contains:
+      cat ARTIFACT_VERSION.var
+      echo
+      echo environment.var file contains:
+      cat environment.var
+    displayName: 'Display and save variables'
+    condition: succeededOrFailed()
+    continueOnError: true
+
+  - task: Docker@2
+    displayName: Authenticate base image
+    inputs:
+      command: login
+      containerRegistry: 'EYC jFrog Docker Registry dev'
+
+  - task: Docker@2
+    displayName: 'Build image'
+    inputs:
+      containerRegistry: 'EYC jFrog Docker Registry $(ENV_CLASS)'
+      repository: ${{ parameters.microservice }}-service
+      command: build
+      Dockerfile: $(Build.SourcesDirectory)/dockerdir/Dockerfile
+      tags: $(BUILD_VAR)
+
+  - ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    - template: ../../common-templates/aqua-scanning.yml
+      parameters:
+        aquasecLogin: AquaSecRegistry-SAAS-EYComply-NonProd
+        aquasecAcr: acemnlpaquacr01
+        aquasecScannerConn: AquaSecConsole-SAAS-EYComply-NonProd
+        imagePath: '$(DOCKER_IMAGE_PATH)'
+
+
+  - ${{ else }}:
+    - template: ../../common-templates/aqua-scanning.yml
+      parameters:
+        aquasecLogin: AquaSecRegistry-SAAS-EYComply-PROD
+        aquasecAcr: acemnlpaquacr01
+        aquasecScannerConn: AquaSecConsole-SAAS-EYComply-PROD
+        imagePath: '$(DOCKER_IMAGE_PATH)'
+
+  - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-docker.ArtifactoryDocker@1
+    displayName: 'Push Docker image to jFrog Artifactory'
+    inputs:
+      artifactoryService: 'EYC jFrog Artifactory - Docker'
+      targetRepo: '$(DOCKER_REPO)'   
+      imageName: '$(DOCKER_IMAGE_PATH)'  
+
+  - task: CopyFiles@2
+    displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+    inputs:
+      SourceFolder: '$(system.defaultworkingdirectory)'
+      Contents: |
+        dockerdir/env*
+        dockerdir/docker*
+        dockerdir/Docker*
+        dockerdir/server*
+        dockerdir/setenv*
+        dockerdir/*.var
+      TargetFolder: '$(build.artifactstagingdirectory)'
+      CleanTargetFolder: true
+      flattenFolders: true
+
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifacts'
+    inputs:
+      ArtifactName: artifact
+    condition: succeededOrFailed()

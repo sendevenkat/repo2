@@ -1,0 +1,144 @@
+trigger: none
+pr: none
+
+pool:
+  vmImage: windows-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: Development
+  values:
+  - Development
+  - QA
+  - UAT
+  - Production
+  - DR
+
+- name: owner
+  displayName: "DevOps Owner"
+  type: string
+  default: EY_EYComply_Devops.GID@ey.net
+  values:
+  - EY_EYComply_Devops.GID@ey.net
+  - Maciej.Zukowski@gds.ey.com
+  - Marina.Perez.Cassiraga@gds.ey.com
+  - Nidhi.Chaudhary@gds.ey.com
+
+- name: location
+  displayName: "Location"
+  type: string
+  default: eastus
+
+- name: deployKaas
+  displayName: "Deploy KaaS?"
+  type: boolean
+  default: false
+
+- name: resourceGroupName
+  displayName: "RG name"
+  type: string
+
+- name: storageAccountName
+  displayName: "Storage account name"
+  type: string
+
+- name: vnetName
+  displayName: "Vnet name"
+  type: string
+
+- name: subnetName
+  displayName: "Subnet name"
+  type: string
+
+stages:
+- stage: Development
+  condition: eq('${{ parameters.environment }}', 'Development')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-kaas.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "Development"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      deployKaas: "${{ parameters.deployKaas }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      isDR: false
+
+- stage: QA
+  condition: eq('${{ parameters.environment }}', 'QA')
+  variables:
+  - template: ../../variables/infra-dev.yml
+  jobs:
+  - template: templates/deploy-kaas.yml
+    parameters:
+      serviceConnection: "EYC-Non-Prod-Subscription"
+      environment: "QA"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      deployKaas: "${{ parameters.deployKaas }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      isDR: false
+
+- stage: UAT
+  condition: eq('${{ parameters.environment }}', 'UAT')
+  variables:
+  - template: ../../variables/infra-uat.yml
+  jobs:
+  - template: templates/deploy-kaas.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "UAT"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      deployKaas: "${{ parameters.deployKaas }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      isDR: false
+
+- stage: Production
+  condition: eq('${{ parameters.environment }}', 'Production')
+  variables:
+  - template: ../../variables/infra-prod.yml
+  jobs:
+  - template: templates/deploy-kaas.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "Production"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      deployKaas: "${{ parameters.deployKaas }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      isDR: false
+
+- stage: DR
+  condition: eq('${{ parameters.environment }}', 'DR')
+  variables:
+  - template: ../../variables/infra-dr.yml
+  jobs:
+  - template: templates/deploy-kaas.yml
+    parameters:
+      serviceConnection: "EY Comply Prod"
+      environment: "Production"
+      owner: "${{ parameters.owner }}"
+      location: "${{ parameters.location }}"
+      deployKaas: "${{ parameters.deployKaas }}"
+      resourceGroupName: "${{ parameters.resourceGroupName }}"
+      storageAccountName: "${{ parameters.storageAccountName }}"
+      vnetName: "${{ parameters.vnetName }}"
+      subnetName: "${{ parameters.subnetName }}"
+      isDR: true

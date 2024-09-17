@@ -1,0 +1,23 @@
+resources:
+  repositories:
+  - repository: eycomply-base
+    name: ey-org/eycomply-base
+    endpoint: eycomply-devops-pipeline
+    type: github
+    ref: feature-576495-fry9c-backend-pipeline
+
+variables:
+- template: pipelines/builds/templates/build-variables.yml@eycomply-base
+
+trigger: none
+pr:
+- develop
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+  path: service-repository
+- checkout: eycomply-base
+- template: pipelines/backend/bcm-fry9c/build-artifact.yml@eycomply-base

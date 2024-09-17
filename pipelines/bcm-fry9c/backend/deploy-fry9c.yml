@@ -1,0 +1,94 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: qa33
+    values:
+      - qa33
+      - prod
+
+  - name: microservice
+    displayName: "Microservice"
+    type: string
+    default: fry9c
+    values:
+      - fry9c
+      - fry9cdataload
+
+  - name: branch_artifact_selector
+    displayName: Deploy
+    type: string
+    default: branch
+    values:
+      - branch
+      - artifact
+
+  - name: branch_artifact_value
+    displayName: Branch or artifact name
+    type: string
+    default: develop
+
+  - name: apply_configmap
+    displayName: "Deploy Configmap"
+    type: boolean
+    default: true
+
+variables:
+  # Global variables
+  - name: DOCKER_BUILDKIT
+    value: 1
+  - template: ../../../variables/environment-global.yml
+    parameters:
+      environment: "${{ parameters.environment }}"
+      microservice: "${{ parameters.microservice }}"
+
+  # Environment-specific variables
+  - ${{ if eq(parameters.environment, 'prod') }}:
+      - template: ../../../variables/environment-prod.yml
+        parameters:
+          microservice: "${{ parameters.microservice }}"
+  - ${{ else }}:
+      - template: ../../../variables/environment-dev.yml
+        parameters:
+          microservice: "${{ parameters.microservice }}"
+
+  - name: namespace
+    ${{ if eq(parameters.environment, 'qa33') }}:
+      value: "fry9c"
+    ${{ if eq(parameters.environment, 'prod') }}:
+      value: "fry9c-prod"
+
+stages:
+  - stage: Build${{ upper(variables.ENV_CLASS) }}
+    jobs:
+      - template: build-stage.yml
+        parameters:
+          environment: "${{ parameters.environment }}"
+          microservice: "${{ parameters.microservice }}"
+          branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+          branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+
+  - stage: Deploy${{ upper(variables.ENV_CLASS) }}
+    dependsOn: Build${{ upper(variables.ENV_CLASS) }}
+    variables:
+      - template: ../../../variables/load-balancers.yml
+      - template: ../../../variables/ingress-rewrites.yml
+    jobs:
+      - template: deploy-stage.yml
+        parameters:
+          environment: "${{ parameters.environment }}"
+          microservice: "${{ parameters.microservice }}"
+          branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+          branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+          configmap: "${{ parameters.apply_configmap }}"
+          deployFunction: false
+          adoEnv: $(ADO_ENV)
+          namespace: ${{ variables.namespace }}

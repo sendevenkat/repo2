@@ -1,0 +1,163 @@
+parameters:
+- name: serviceConnection
+  type: string
+- name: environment
+  type: string
+- name: owner
+  type: string
+- name: location
+  type: string
+- name: deployKaas
+  type: boolean
+- name: resourceGroupName
+  type: string
+- name: storageAccountName
+  type: string
+- name: vnetName
+  type: string
+- name: subnetName
+  type: string
+- name: isDR
+  type: boolean
+jobs:
+- deployment: Provisioning
+  environment: Infrastructure
+  timeoutInMinutes: 0
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        #Save Resource Group Name
+        - bash: |
+           # echo "##vso[task.setvariable variable=var_resourceGroupName]"${{ parameters.resourceGroupName }}""
+            echo "resource_group is: $(var_resourceGroupName)"
+          displayName: Set RSG name
+
+        #Generate KaaS name
+        - task: PowerShell@2
+          displayName: Generate KaaS name
+          condition: eq(${{ parameters.deployKaas }}, true)
+          inputs:
+            filePath: 'scripts/Generate-Name.ps1'
+            arguments: '-resource "Azure Kubernetes Service" -variableName "var_AKSName" -environment "Production" -region "${{ parameters.location }}" -project_name "$(var_projectName)" -spnID "$(VAR_SPN_ID)" -spnSecret "$(VAR_SPN_SECRET)"'
+          enabled: false   #this has been disabled for DR static Name
+
+        - bash: |
+            echo "aks name is  $(var_AKSName)"
+          displayName: AKS NAME 
+        #Create KaaS
+        - task: PowerShell@2
+          displayName: Deploy KaaS
+          condition: and(succeeded(), eq(${{ parameters.deployKaas}}, true))
+          inputs:
+            filePath: 'scripts/Call-at-api.ps1'
+            arguments: '-ansibleUser $env:AT_USER -ansibleSecret $env:AT_SECRET -aksName "$(var_AKSName)" -SPN_ID "$(VAR_SPN_ID)" -SPN_SECRET "$(VAR_SPN_SECRET)" -tenantId "$(var_tenantId)" -chargeCode "$(var_chargeCode)" -deploymentId "$(var_deploymentId)" -owner "${{ parameters.owner }}" -environment "Production" -location "${{ parameters.location }}" -resourceGroupName "$(var_resourceGroupName)" -azure_rm_subid "$(var_azure_rm_subid)" -stgId "/subscriptions/$(var_azure_rm_subid)/resourceGroups/$(var_resourceGroupName)/providers/Microsoft.Storage/storageAccounts/${{ parameters.storageAccountName }}" -subnetId "/subscriptions/$(var_azure_rm_subid)/resourceGroups/$(var_resourceGroupName)/providers/Microsoft.Network/virtualNetworks/${{ parameters.vnetName }}/subnets/${{ parameters.subnetName }}" -logAnalyticsResourceId "$(var_logAnalyticsResourceId)" -systemAgentPoolMaxCount "$(var_systemAgentPoolMaxCount)" -systemAgentPoolMaxPods $(var_systemAgentPoolMaxPods) -systemAgentPoolMinCount $(var_systemAgentPoolMinCount) -systemAgentPoolOsDiskSizeGB $(var_systemAgentPoolOsDiskSizeGB) -systemAgentPoolVmSize $(var_systemAgentPoolVmSize) -availabilityZones "$(var_availabilityZones)" -templateId "6457" -billingProjectName "$(var_billingProjectName)"'
+          env:
+            AT_USER: "$(VAR_AT_USER)"
+            AT_SECRET: "$(VAR_AT_SECRET)"
+          enabled: true  
+        #Attach ACR
+        - task: AzureCLI@2
+          displayName: Attach ACR
+          condition: and(succeeded(), eq(${{ parameters.deployKaas}}, true))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              ROLE_ID=$(MSYS_NO_PATHCONV=1 az role definition list --scope "$(var_acrId)" --name AcrPull --query "[0].id" -o tsv)
+              OBJECT_ID=$(MSYS_NO_PATHCONV=1 az identity show --name "$(var_AKSName)-agentpool" --resource-group MC_$(var_resourceGroupName)_$(var_AKSName)_${{ parameters.location }} --query '[principalId]' --output tsv)
+              MSYS_NO_PATHCONV=1 az role assignment create --assignee-object-id $OBJECT_ID --assignee-principal-type ServicePrincipal --scope "$(var_acrId)" --role $ROLE_ID
+          enabled: true   
+        #Annotate NGINX service YAML
+        - task: AzureCLI@2
+          displayName: Add DNS label to Public IP
+          condition: and(succeeded(), eq(${{ parameters.deployKaas}}, true))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              #Login to AKS
+              az aks get-credentials --admin -g "$(var_resourceGroupName)" -n "$(var_AKSName)"
+
+              #Convert AKS name to lowercase
+              AKS_NAME_PARSED=$(echo "$(var_AKSName)" | tr '[A-Z]' '[a-z]')
+              echo $AKS_NAME_PARSED
+
+              #Add annotation
+              kubectl annotate --overwrite svc nginx-ingress-nginx-controller --namespace ingress-controller service.beta.kubernetes.io/azure-dns-label-name=$AKS_NAME_PARSED-ingress-lb
+          enabled: true
+        #Create DR Namespace 
+        - task: AzureCLI@2
+          displayName: Create Namspace to DR
+          condition: and(succeeded(), and(eq(${{ parameters.deployKaas}}, true), eq(${{ parameters.isDR }}, true)))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              #Login to AKS
+              az aks get-credentials --admin -g "$(var_resourceGroupName)" -n "$(var_AKSName)"
+
+              kubectl create namespace prod-dr
+          enabled: true
+        #Get Public IP of NGINX controller
+        - task: AzureCLI@2
+          displayName: Get Public IP of Ngix controller
+          condition: and(succeeded(), and(eq(${{ parameters.deployKaas}}, true), eq(${{ parameters.isDR }}, true)))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              #Login to AKS
+              az aks get-credentials --admin -g "$(var_resourceGroupName)" -n "$(var_AKSName)"
+
+              #Get cluster public IP
+              PUBLIC_IP="$(kubectl get svc nginx-ingress-nginx-controller --namespace ingress-controller -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+              echo "Public IP of ngnix controller is : $PUBLIC_IP"
+              echo "##vso[task.setvariable variable=PUBLIC_IP]$PUBLIC_IP"
+          enabled: true
+
+        #Update application gateway
+        - task: AzureCLI@2
+          displayName: Update Application Gateway Backend Pool Address
+          condition: and(succeeded(), and(eq(${{ parameters.deployKaas}}, true), eq(${{ parameters.isDR }}, true)))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az network application-gateway address-pool update -g $(var_resourceGroupName) --gateway-name $(var_appGatewayName) -n $(var_appGatewayBackendPoolName) --servers $PUBLIC_IP
+
+
+
+        #Create NSG rule
+        # - task: AzureCLI@2
+        #   displayName: Add FrontDoor rule to NSG
+        #   condition: and(succeeded(), eq(${{ parameters.deployKaas}}, true))
+        #   inputs:
+        #     azureSubscription: "${{ parameters.serviceConnection }}"
+        #     scriptType: bash
+        #     scriptLocation: inlineScript
+        #     inlineScript: |
+        #       #Login to AKS
+        #       az aks get-credentials --admin -g "$(var_resourceGroupName)" -n "$(var_AKSName)"
+
+        #       #Get cluster public IP
+        #       PUBLIC_IP="$(kubectl get svc nginx-ingress-nginx-controller --namespace ingress-controller -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+        #       echo $PUBLIC_IP
+
+        #       #Get NSG ID
+        #       NSG_ID="$(MSYS_NO_PATHCONV=1 az network vnet subnet show --name ${{ parameters.subnetName }} --vnet-name ${{ parameters.vnetName }} --resource-group $(var_resourceGroupName) --query networkSecurityGroup.id -o tsv)"
+        #       echo $NSG_ID
+
+        #       #Get NSG Name
+        #       NSG_NAME="$(MSYS_NO_PATHCONV=1 az network nsg show --ids $NSG_ID --query name -o tsv)"
+        #       echo $NSG_NAME
+
+        #       #Create FrontDoor rule
+        #       MSYS_NO_PATHCONV=1 az network nsg rule create --resource-group $(var_resourceGroupName) --nsg-name $NSG_NAME --name Allow_FrontDoor --priority 100 --direction Inbound --source-address-prefixes AzureFrontDoor.Backend --source-port-ranges "*" --destination-address-prefixes "$PUBLIC_IP" --destination-port-ranges 80 443 --protocol Tcp --access Allow

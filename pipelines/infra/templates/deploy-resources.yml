@@ -1,0 +1,751 @@
+parameters:
+- name: serviceConnection
+  type: string
+- name: environment
+  type: string
+- name: owner
+  type: string
+- name: location
+  type: string
+- name: resourceGroup
+  type: boolean
+- name: resourceGroupName
+  type: string
+- name: keyVault
+  type: boolean
+- name: keyVaultName
+  type: string
+- name: networkSecurityGroup
+  type: boolean
+- name: vnetName
+  type: string
+- name: subnetName
+  type: string
+- name: storageAccount
+  type: boolean
+- name: storageAccountName
+  type: string
+- name: storageAccountSqlmi
+  type: boolean
+- name: storageAccountSqlmiName
+  type: string
+- name: recoveryServicesVault
+  type: boolean
+- name: rsvName
+  type: string
+- name: redisCache
+  type: boolean
+- name: redisCacheName
+  type: string
+- name: eventHub
+  type: boolean
+- name: eventHubNamespaceName
+  type: string
+- name: eventHubTopicsCreate
+  type: boolean
+- name: serviceBus
+  type: boolean
+- name: serviceBusName
+  type: string
+- name: serviceBusQueues
+  type: boolean
+- name: serviceBusQueueList
+  type: object
+- name: appServicePlan
+  type: string
+- name: appServicePlanName
+  type: string
+- name: appInsights
+  type: boolean
+- name: appInsightsName
+  type: string
+- name: functionApp
+  type: boolean
+- name: applicationGateway
+  type: boolean
+- name: appGatewayName
+  type: string
+- name: urlForAppGateway
+  type: string
+- name: backendAddress
+  type: string
+- name: wafPolicy
+  type: boolean
+- name: sqlmi
+  type: boolean
+- name: sqlmiName
+  type: string
+- name: sqlmiSubnet
+  type: string
+
+jobs:
+- deployment: Provisioning
+  environment: Infrastructure
+  timeoutInMinutes: 0
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        #Set var_owner
+        - bash: |
+            echo "##vso[task.setvariable variable=var_owner]${{ parameters.owner }}"
+          displayName: Set var_owner
+
+        #Deploy Resource Group
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateresourcegroupV116@1
+            customCondition: eq(${{ parameters.resourceGroup }}, true)
+            displayName: Create Resource Group
+            name: RG1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+
+        #Save Resource Group Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_resourceGroupName]"${{ parameters.resourceGroupName }}""
+          condition: eq(${{ parameters.resourceGroup }}, false)
+          displayName: Set RSG name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_resourceGroupName]"$(RG1.name)""
+          condition: eq(${{ parameters.resourceGroup }}, true)
+          displayName: Set RSG name
+          
+        #Deploy Key Vault
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatekeyvaultV200@1
+            customCondition: eq(${{ parameters.keyVault }}, true)
+            displayName: Create Key Vault
+            name: KV1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_enablePrivateEndpoint: false
+              var_skipEndpointConfig: true
+              var_enablePurgeProtection: true
+              var_addSpnToPolicies: true
+              var_objectsIdsAccess: "['f2b8c98d-b618-46e1-8ad1-531a8f61ca42']" #IT-FSO EYCOMPLY MSP01-Team
+
+        #Save Key Vault Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_keyVaultName]"${{ parameters.keyVaultName }}""
+          condition: eq(${{ parameters.keyVault }}, false)
+          displayName: Set Key Vault name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_keyVaultName]"$(KV1.name)""
+          condition: eq(${{ parameters.keyVault }}, true)
+          displayName: Set Key Vault name
+
+        #Create Network Security Group
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatenetworksecuritygroupV300@1
+            customCondition: eq(${{ parameters.networkSecurityGroup }}, true)
+            displayName: Deploy Network Security Group
+            name: NSG1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_ipamUrl: "$(var_ipamUrl)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_subnetName: "${{ parameters.subnetName }}"
+
+        #Create Storage Account for client files
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatestorageaccountV302@1
+            customCondition: eq(${{ parameters.storageAccount }}, true)
+            displayName: Deploy Storage Account for client files
+            name: SA1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_storageAccountKind: "StorageV2"
+              var_storageAccountName: "$(var_storageAccountName)"
+
+        #Save Storage Account name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_storageAccountName]"$(SA1.name)""
+          condition: eq(${{ parameters.storageAccount }}, true)
+          displayName: Set Storage Account name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_storageAccountName]"${{ parameters.storageAccountName }}""
+          condition: eq(${{ parameters.storageAccount }}, false)
+          displayName: Set Storage Account name
+
+        #Create Storage Account for SQL MI
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatestorageaccountV302@1
+            customCondition: eq(${{ parameters.storageAccountSqlmi }}, true)
+            displayName: Deploy Storage Account for SQL MI
+            name: SA2
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_storageAccountKind: "$(var_sqlmiStaKind)"
+              var_storageAccountSku: "$(var_sqlmiStaSku)"
+
+        #Save Storage Account name for SQL MI
+        - bash: |
+            echo "##vso[task.setvariable variable=var_storageAccountSqlmiName]"$(SA2.name)""
+          condition: eq(${{ parameters.storageAccountSqlmi }}, true)
+          displayName: Set Storage Account name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_storageAccountSqlmiName]"${{ parameters.storageAccountSqlmiName }}""
+          condition: eq(${{ parameters.storageAccountSqlmi }}, false)
+          displayName: Set Storage Account name
+
+        # #Create RSV -  it is commented out since there is no bb available (not supported?)
+        # - template: launch-bb.yml
+        #   parameters:
+        #     taskName: prodbbcreaterecoveryvaultV110@1
+        #     customCondition: eq(${{ parameters.recoveryServicesVault }}, true)
+        #     displayName: Deploy RSV
+        #     name: RSV1
+        #     location: "${{ parameters.location }}"
+        #     environment: "${{ parameters.environment }}"
+        #     serviceConnection: "${{ parameters.serviceConnection }}"
+        #     inputs:
+        #       var_resourceGroupName: "$(var_resourceGroupName)"
+
+        # #Save RSV name
+        # - bash: |
+        #     echo "##vso[task.setvariable variable=var_rsvName]"$(RSV1.name)""
+        #   condition: eq(${{ parameters.recoveryServicesVault }}, true)
+        #   displayName: Set RSV name
+        # - bash: |
+        #     echo "##vso[task.setvariable variable=var_rsvName]"${{ parameters.rsvName }}""
+        #   condition: eq(${{ parameters.recoveryServicesVault }}, false)
+        #   displayName: Set RSV name
+
+        #Create Redis Cache
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateazurerediscacheV210@1
+            customCondition: and(eq(${{ parameters.redisCache }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+            displayName: Deploy Redis Cache
+            name: RC1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_redisCacheName: "$(var_redisCacheName)"
+              var_logAnalyticsResourceId: "$(var_logAnalyticsResourceId)"
+              var_skuName: "Premium"
+              var_redisVersion: "$(var_redisVersion)"
+        #Create DR Redis Cache
+        - task: AzureCLI@2
+          displayName: Create Azure Cache for Redis 
+          condition: and(eq(${{ parameters.redisCache }}, true), eq('${{ parameters.environment }}', 'DR'))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              if az redis show --name $(var_redisCacheName) --resource-group $(var_resourceGroupName) &>/dev/null; then
+                echo "Creating Azure Cache for Redis instance : $(var_redisCacheName)"
+                sleep 120
+                echo "Successfully created Azure Cache Instance: $(var_redisCacheName)"
+              else
+                az redis create \
+                  --name $(var_redisCacheName) \
+                  --resource-group $(var_resourceGroupName) \
+                  --location $(var_location) \
+                  --sku Premium \
+                  --vm-size p1 \
+                echo "Successfully created Azure Cache Instance: $(var_redisCacheName)"
+              fi
+              az redis show --name $(var_redisCacheName) --resource-group $(var_resourceGroupName) --query "{Name:name, ProvisioningState:provisioningState, HostName:hostName, Port:port}" --output table
+
+        #Save Redis Cache name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_redisCacheName]"$(RC1.name)""
+          condition: and(eq(${{ parameters.redisCache }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+          displayName: Set Redis Cache name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_redisCacheName]"${{ parameters.redisCacheName }}""
+          condition: eq(${{ parameters.redisCache }}, false)
+          displayName: Set Redis Cache name
+
+        #Remove default rule from Redis Cache
+        - task: AzureCLI@2
+          displayName: Remove default rule from Redis Cache
+          condition: and(eq(${{ parameters.redisCache }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az redis firewall-rules delete --rule-name Default --name $(var_redisCacheName) --resource-group $(var_resourceGroupName)
+
+        # Create Event Hub new instance
+        # This task is used to create Event Hub Namespace and Event Hub for non-DR environments. The name of instance is generated dynamically.
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateazureeventhubV200@1
+            customCondition: and(eq(${{ parameters.eventHub }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+            displayName: Deploy Event Hub
+            name: EH1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_eventHubName: '["default-event-hub"]'
+              var_tier: "Premium"
+              var_capacity: 2
+              var_messageRetentionInDays: 2
+              var_partitionCount: 5
+              var_subnetName: "${{ parameters.subnetName }}"
+              var_enablePrivateEndpoint: true
+              var_eventhubAuthorizationRuleName: sendAndListen
+
+        # This task is to set variable var_eventHubNamespaceName used to Event Hub configurations
+        - bash: |
+            echo "##vso[task.setvariable variable=var_eventHubNamespaceName]"$(EH1.name)""
+          condition: and(eq(${{ parameters.eventHub }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+          displayName: Set Event Hub Namespace name for new instance
+        - bash: |
+            echo "##vso[task.setvariable variable=var_eventHubNamespaceName]"$(var_eventHubNamespaceName)""
+          condition: and(eq(${{ parameters.eventHub }}, true), eq('${{ parameters.environment }}', 'DR'))
+          displayName: Set Event Hub Namespace name for DR instance
+        - bash: |
+            echo "##vso[task.setvariable variable=var_eventHubNamespaceName]"${{ parameters.eventHubNamespaceName }}""
+          condition: and(eq(${{ parameters.eventHubTopicsCreate }}, true), eq(${{ parameters.eventHub }}, false))
+          displayName: Set Event Hub Namespace name for Topics Creation task
+
+        # Create Event Hub for DR, separate task is used since var_eventHubNamespaceName is fixed and kept in infra-dr.yml file
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateazureeventhubV200@1
+            customCondition: and(eq(${{ parameters.eventHub }}, true), eq('${{ parameters.environment }}', 'DR'))
+            displayName: Deploy Event Hub DR
+            name: DREH1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_nameSpaceName: "$(var_eventHubNamespaceName)"
+              var_eventHubName: '["default-event-hub"]'
+              var_tier: "Premium"
+              var_capacity: 2
+              var_messageRetentionInDays: 2
+              var_partitionCount: "$(var_partitionCount)"
+              var_subnetName: "${{ parameters.subnetName }}"
+              var_enablePrivateEndpoint: true
+              var_eventhubAuthorizationRuleName: sendAndListen
+
+        # Adjust EventHub configuration for DR environment, This is needed to reproduce fixed productuion configuration on DR environment
+        - task: AzureCLI@2
+          displayName: "Adjust EventHub configuration"
+          condition: and(eq(${{ parameters.eventHub }}, true), eq('${{ parameters.environment }}', 'DR'))
+          inputs:
+              azureSubscription: "${{ parameters.serviceConnection }}"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                  echo "EH - Allowing public access..."
+                  az eventhubs namespace update \
+                    --resource-group "$(var_resourceGroupName)" \
+                    --namespace-name "$(var_eventHubNamespaceName)" \
+                    --public-network-access Enabled
+                  az eventhubs namespace network-rule-set update \
+                    --resource-group "$(var_resourceGroupName)" \
+                    --namespace-name "$(var_eventHubNamespaceName)" \
+                    --set defaultAction=Allow
+                  echo "EH - public access allowed"
+                  echo "EH - Creating authorization rule..."
+                  az eventhubs namespace authorization-rule create \
+                    --resource-group "$(var_resourceGroupName)" \
+                    --namespace-name "$(var_eventHubNamespaceName)" \
+                    --authorization-rule-name SendAndListen \
+                    --rights Send Listen
+                  echo "EH - SendAndListen authorization rule created"
+
+        # Create EventHubs (topis). 
+        # This task is used to create Event Hubs (topics) for all environments when new Event Hub Namespace is created or may be applied to existing instance when eventHubTopicsCreate is set to "true" 
+        # Base on variables/eventhub-structure.yml file.
+        # To create new topic please add it to the list of eventHubs in variables/eventhub-structure.yml file and re-run pipeline with 'eventHubTopicsCreate' parameter set to "true".
+        - task: AzureCLI@2
+          displayName: "Create EventHubs"
+          condition: or(and(eq(${{ parameters.eventHub }}, true), eq(${{ parameters.eventHubTopicsCreate }}, true)), eq(${{ parameters.eventHubTopicsCreate }}, true))
+          inputs:
+              azureSubscription: "${{ parameters.serviceConnection }}"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                source variables/eventhub-structure.yml
+
+                if [[ ${{ parameters.environment }} == "Development" ]]; then
+                  var_eventHubSuffix="dev"
+                elif [[ ${{ parameters.environment }} == "QA" ]]; then
+                  var_eventHubSuffix="qa"
+                elif [[ ${{ parameters.environment }} == "UAT" ]]; then
+                  var_eventHubSuffix="uat"
+                else
+                  var_eventHubSuffix="prod"
+                fi
+
+                echo $var_eventHubSuffix
+                
+                for topic in ${eventHubs[@]}
+                do
+                  topic=$(echo $topic | sed "s/{{ENV}}/$var_eventHubSuffix/")
+                  echo "Creating EventHub: $topic"
+                  az eventhubs eventhub create \
+                    --resource-group "$(var_resourceGroupName)" \
+                    --namespace-name "$(var_eventHubNamespaceName)" \
+                    --name $topic \
+                    --partition-count "$(var_partitionCount)" \
+                    --retention-time 48 \
+                    --cleanup-policy Delete
+                  echo "EventHub: $topic created"
+                done
+                      
+        # Create EH ConsumerGroups
+        # This task is used to create Event Hub's Consumer Groups for all environments when new Event Hub Namespace is created or may be applied to existing instance when eventHubTopicsCreate is set to "true" 
+        # Base on variables/eventhub-structure.yml file.
+        # If you need to add consumer group for ag client, please add it to the list of consumerGroups in variables/eventhub-structure.yml file and add condition to the if statement below.
+        # For other clients, please add consumer group to the list of consumerGroups in variables/eventhub-structure.yml file.
+        - task: AzureCLI@2
+          displayName: "Create EH ConsumerGroups"
+          condition: or(and(eq(${{ parameters.eventHub }}, true), eq(${{ parameters.eventHubTopicsCreate }}, true)), eq(${{ parameters.eventHubTopicsCreate }}, true))
+          inputs:
+              azureSubscription: "${{ parameters.serviceConnection }}"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                source variables/eventhub-structure.yml
+
+                if [[ ${{ parameters.environment }} == "Development" ]]; then
+                  var_eventHubSuffix="dev"
+                elif [[ ${{ parameters.environment }} == "QA" ]]; then
+                  var_eventHubSuffix="qa"
+                elif [[ ${{ parameters.environment }} == "UAT" ]]; then
+                  var_eventHubSuffix="uat"
+                else
+                  var_eventHubSuffix="prod"
+                fi
+
+                echo $var_eventHubSuffix
+
+                createConsumerGroup () {
+                    az eventhubs eventhub consumer-group create \
+                            --resource-group "$(var_resourceGroupName)" \
+                            --namespace-name "$(var_eventHubNamespaceName)" \
+                            --eventhub-name "$1" \
+                            --name "$2"
+                }
+
+                for consumerGroup in ${consumerGroups[@]}
+                do
+                  consumerGroup=$(echo $consumerGroup | sed "s/{{ENV}}/$var_eventHubSuffix/")
+                  if [[ "$consumerGroup" =~ ^br_data_provider_* ]]; then
+                    createConsumerGroup "br_data_provider_consumer_$var_eventHubSuffix" "$consumerGroup"
+                  elif [[ "$consumerGroup" =~ (^comments-consumer-|^tracker-consumer-) ]]; then
+                    createConsumerGroup "cs_comment_topic_$var_eventHubSuffix" "$consumerGroup"
+                  else
+                    for client in ${clients[@]}
+                      do
+                        if [[ "$client" == "ag2" && "$consumerGroup" =~ (^audit_trail_service_input_|^dlq_input_topic_|^logging_service_input_|^na_input_topic_) ]]; then
+                          createConsumerGroup "$consumerGroup.$client" "$consumerGroup"
+                        fi
+                        if [[ "$client" != "ag2" ]]; then
+                          createConsumerGroup "$consumerGroup.$client" "$consumerGroup"
+                        fi
+                      done
+                  fi
+                done
+
+        #Create Service Bus
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateservicebusV300@1
+            customCondition: and(eq(${{ parameters.serviceBus }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+            displayName: Deploy Service Bus
+            name: SB1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_keyVaultName: "$(var_keyVaultName)"
+              var_tier: "Premium"
+              var_capacity: 1
+
+        #Create Service Bus DR
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateservicebusV300@1
+            customCondition: and(eq(${{ parameters.serviceBus }}, true), eq('${{ parameters.environment }}', 'DR'))
+            displayName: Deploy Service Bus
+            name: SBDR
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_keyVaultName: "$(var_keyVaultName)"
+              var_serviceBusName: "$(var_serviceBusName)"
+              var_tier: "Premium"
+              var_capacity: 1              
+
+        #Save Service Bus name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_serviceBusName]"$(SB1.name)""
+          condition: and(eq(${{ parameters.serviceBus }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+          displayName: Set Service Bus name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_serviceBusName]"${{ parameters.serviceBusName }}""
+          condition: and(eq(${{ parameters.serviceBus }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+          displayName: Set Service Bus name
+       
+        #Create queues
+        - ${{ each queue in parameters.serviceBusQueueList }}:
+          - task: AzureCLI@2
+            displayName: "Create queue: ${{ queue }}"
+            condition: and(eq(${{ parameters.serviceBusQueues }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+            inputs:
+              azureSubscription: "${{ parameters.serviceConnection }}"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az servicebus queue create \
+                --resource-group "$(var_resourceGroupName)" \
+                --namespace-name "$(var_serviceBusName)" \
+                --name ${{ queue }} \
+                --default-message-time-to-live "PT6H" \
+                --enable-dead-lettering-on-message-expiration false \
+                --enable-duplicate-detection false \
+                --enable-partitioning false \
+                --lock-duration "PT5M" \
+                --max-delivery-count 1 \
+                --max-size 1024
+
+        - task: AzureCLI@2
+          displayName: "Create Service Bus queues based on variables/servicebus-structure.yml file"
+          condition: and(eq(${{ parameters.serviceBus }}, true), eq('${{ parameters.environment }}', 'DR'))
+          inputs:
+              azureSubscription: "${{ parameters.serviceConnection }}"
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                source variables/servicebus-structure.yml
+                for queue in ${serviceBusQueues[@]}
+                do
+                    echo "Creating Service Bus: $queue"
+                    az servicebus queue create \
+                    --resource-group "$(var_resourceGroupName)" \
+                    --namespace-name "$(var_serviceBusName)" \
+                    --name "$queue" \
+                    --default-message-time-to-live "PT6H" \
+                    --enable-dead-lettering-on-message-expiration false \
+                    --enable-duplicate-detection false \
+                    --enable-partitioning false \
+                    --lock-duration "00h05m00s" \
+                    --max-delivery-count 1 \
+                    --max-size 1024
+                    echo "Service Bus: $queue created"
+                done
+                
+        # #Create App Service Plan -  it is commented out since there is no bb available (not supported?)
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateappserviceplanV310@1
+            customCondition: eq(${{ parameters.appServicePlan }}, true)
+            displayName: Deploy App Service Plan
+            name: APPSP
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              #var_logAnalyticsResourceId: $(var_logAnalyticsResourceId)
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_skuCode: "P1v2"
+              var_numberOfWorkers: 1
+              var_applicationServicePlanOS: "windows"
+              var_appServicePlanName: $(var_appServicePlanName)
+              var_azureCloud: "AzureCloud"
+
+        # #Save App Service Plan Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_appServicePlanName]"$(APPSP.name)""
+          condition: eq(${{ parameters.appServicePlan }}, true)
+          displayName: Set App Service Plan name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_appServicePlanName]"${{ parameters.appServicePlanName }}""
+          condition: eq(${{ parameters.appServicePlan }}, false)
+          displayName: Set App Service Plan name
+
+        #Create App Insights
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateappinsightsV300@1
+            customCondition: eq(${{ parameters.appInsights }}, true)
+            displayName: Deploy App Insights
+            name: APPI1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_appInsightsName: "$(var_appInsightsName)"
+              var_subscriptionId: "$(var_azure_rm_subid)"
+
+        # #Save App Insights Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_appInsightsName]"$(APPI1.name)""
+          condition: eq(${{ parameters.appInsights }}, true)
+          displayName: Set App Insights name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_appInsightsName]"${{ parameters.appInsightsName }}""
+          condition: eq(${{ parameters.appInsights }}, false)
+          displayName: Set App Insights name
+
+        # #Create Function App
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateazurefunctionappV600@1
+            customCondition: and(eq(${{ parameters.functionApp }}, true), not(eq('${{ parameters.environment }}', 'DR')))
+            displayName: Deploy Function App
+            name: FAPP
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_appServicePlanName: "$(var_appServicePlanName)"
+              var_appInsightsName: "$(var_appInsightsName)"
+              var_storageAccountName: "$(var_storageAccountName)"
+              var_framework: java|17
+              var_functionName: "$(var_functionName)"
+
+        # DR Function App
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreateazurefunctionappV600@1
+            customCondition: and(eq(${{ parameters.functionApp }}, true), eq('${{ parameters.environment }}', 'DR'))
+            displayName: Deploy Function App
+            name: FAPPDR
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_subscriptionId: "$(var_azure_rm_subid)"
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_appServicePlanName: "$(var_appServicePlanName)"
+              var_appInsightsName: "$(var_appInsightsName)"
+              var_storageAccountId: "$(var_appStorageAccount)"
+              var_storageAccountKey: "$(var_storageAccountKey)"
+              var_framework: "$(var_framework)"
+              var_functionName: "$(var_functionName)"
+        # #Create Application gateway
+        # - template: launch-bb.yml
+        #   parameters:
+        #     taskName: prodbbcreateapplicationgatewaywafv2V210@1
+        #     customCondition: eq(${{ parameters.applicationGateway }}, true)
+        #     displayName: Deploy App Gateway
+        #     name: APPGW
+        #     location: "${{ parameters.location }}"
+        #     environment: "${{ parameters.environment }}"
+        #     serviceConnection: "${{ parameters.serviceConnection }}"
+        #     inputs:
+        #       var_resourceGroupName: "$(var_resourceGroupName)"
+        #       var_domainNameLabel: "${{ parameters.urlForAppGateway }}"
+        #       var_virtualNetworkName: "$(var_virtualNetworkName)"
+        #       var_createCName: false
+        #       var_subnetId: "/subscriptions/$(var_azure_rm_subid)/resourceGroups/$(var_resourceGroupName)/providers/Microsoft.Network/virtualNetworks/${{ parameters.vnetName }}/subnets/${{ parameters.subnetName }}"
+        #       var_routes: '[{"backendAddresses": ["${{ parameters.backendAddress }}"]}]'
+
+        # #Save Application Gateway Name
+        # - bash: |
+        #     echo "##vso[task.setvariable variable=var_appGatewayName]"$(APPGW.name)""
+        #   condition: eq(${{ parameters.applicationGateway }}, true)
+        #   displayName: Set App Gateway name
+        # - bash: |
+        #     echo "##vso[task.setvariable variable=var_appGatewayName]"${{ parameters.appGatewayName }}""
+        #   condition: eq(${{ parameters.applicationGateway }}, false)
+        #   displayName: Set App Gateway name
+
+        # #Deploy WAF policy
+        # - template: launch-bb.yml
+        #   parameters:
+        #     taskName: prodbbcreatewebapplicationfirewallpolicyV100@1
+        #     customCondition: eq(${{ parameters.wafPolicy }}, true)
+        #     displayName: Deploy WAF Policy
+        #     name: WAFP
+        #     location: "${{ parameters.location }}"
+        #     environment: "${{ parameters.environment }}"
+        #     serviceConnection: "${{ parameters.serviceConnection }}"
+        #     inputs:
+        #       var_resourceGroupName: "$(var_resourceGroupName)"
+        #       var_wafResourceId: "/subscriptions/$(var_azure_rm_subid)/resourcegroups/$(var_resourceGroupName)/providers/microsoft.network/applicationgateways/$(var_appGatewayName)"
+        #       var_mode: "Prevention"
+        #       var_requestBodyCheck: false
+
+        #Create container for SQL MI
+        - task: AzureCLI@2
+          displayName: Create container for SQL MI
+          condition: eq(${{ parameters.sqlmi }}, true)
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              az storage container create -n $(var_containerName) --account-name $(var_storageAccountSqlmiName) --resource-group $(var_resourceGroupName)
+
+        #Create SQL MI
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatesqldatabaseV220@1
+            customCondition: and(succeeded(), eq(${{ parameters.sqlmi }}, true))
+            displayName: Deploy SQL MI
+            name: SMI1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_subnetName: "${{ parameters.sqlmiSubnet }}"
+              var_storageAccountName: "$(var_storageAccountSqlmiName)"
+              var_containerName: "$(var_containerName)"
+              var_storageSizeInGB: "$(var_storageSizeInGB)"
+              var_serverTier: "$(var_serverTier)"
+              var_vCores: "$(var_vCores)"
+
+        #Save SQL MI Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_sqlmiName]"$(SMI1.name)""
+          condition: eq(${{ parameters.sqlmi }}, true)
+          displayName: Set SQL MI name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_sqlmiName]"${{ parameters.sqlmiName }}""
+          condition: eq(${{ parameters.sqlmi }}, false)
+          displayName: Set SQL MI name

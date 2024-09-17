@@ -1,0 +1,31 @@
+trigger: none
+pr: none
+variables:
+- group: eyc-ansible-details
+
+pool:
+  vmImage: 'windows-latest'
+
+parameters:
+  - name: email
+    displayName: "Email Address"
+    type: string
+    default: none@ey.com
+
+steps:
+- script: |
+    mkdir -p $(Build.SourcesDirectory)/powershell/
+    cp ./pipelines/Ad-Hoc-Automation-Pipelines/F5-VPN/f5vpn.ps1 $(Build.SourcesDirectory)/powershell/
+    ls -lrt
+  displayName: 'Copy files to Server'
+
+- task: powershell@2
+  env:
+    ANSIBLE_USER: $(ansible-user)
+    ANSIBLE_PSWD: $(ansible-pswd)
+    EMAIL: ${{ parameters.email }}
+  inputs:
+    targetType: 'filePath'
+    filePath: '$(Build.SourcesDirectory)/pipelines/Ad-Hoc-Automation-Pipelines/F5-VPN/f5vpn.ps1'
+  displayName: 'Add User to F5 VPN'
+

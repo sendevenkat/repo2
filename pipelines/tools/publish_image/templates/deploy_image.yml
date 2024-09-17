@@ -1,0 +1,56 @@
+parameters:
+  - name: stageName
+    type: string
+  - name: jfrogRegistry
+    type: string
+  - name: publicImageRegistry
+    type: string
+  - name: publicImage
+    type: string
+  - name: tagetRepo
+    type: string
+  - name: targetImage
+    type: string
+  - name: targetImageTag
+    type: string
+
+jobs:
+  - job: "UploadTo${{ parameters.stageName }}"
+    displayName: "Upload image ${{ parameters.publicImage }} to ${{ parameters.stageName }}"
+    steps:
+      - bash: |
+          echo "##vso[task.setvariable variable=publicImage;]${{ parameters.publicImageRegistry }}/${{ parameters.publicImage }}"
+          echo "##vso[task.setvariable variable=jfrogImage;]${{ parameters.jfrogRegistry }}/publicimages/${{ parameters.targetImage }}:${{ parameters.targetImageTag }}"
+        displayName: "Set Variables"
+
+      - script: "docker pull $(publicImage)"
+        displayName: "Docker Pull Image"
+
+      - script: "docker tag $(publicImage) $(jfrogImage)"
+        displayName: "Tag Docker Image"
+
+      - script: docker images
+        displayName: "List Docker Images"
+
+      - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-docker.ArtifactoryDocker@1
+        displayName: "Push Docker image to jFrog Artifactory"
+        inputs:
+          artifactoryService: "EYC jFrog Artifactory - Docker"
+          targetRepo: "${{ parameters.tagetRepo }}/publicimages"
+          imageName: "$(jfrogImage)"
+
+      - ${{ if or(eq(parameters.stageName, 'Dev'), eq(parameters.stageName, 'QA'))}}:
+        - template: /pipelines/common-templates/aqua-scanning.yml
+          parameters:
+            aquasecLogin: AquaSecRegistry-SAAS-EYComply-NonProd
+            aquasecAcr: acemnlpaquacr01
+            aquasecScannerConn: AquaSecConsole-SAAS-EYComply-NonProd
+            imagePath: "$(jfrogImage)"
+
+      - ${{ else }}:
+        - template: /pipelines/common-templates/aqua-scanning.yml
+          parameters:
+            aquasecLogin: AquaSecRegistry-SAAS-EYComply-PROD
+            aquasecAcr: acemnlpaquacr01
+            aquasecScannerConn: AquaSecConsole-SAAS-EYComply-PROD
+            imagePath: "$(jfrogImage)"

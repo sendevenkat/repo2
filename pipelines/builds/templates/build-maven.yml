@@ -1,0 +1,79 @@
+steps:
+  
+- script: |
+    if [ -d ~/.m2 ] && [ -f ~/.m2/settings.xml ]
+    then
+    echo ".m2 directory and settings.xml file exists"
+    rm -f ~/.m2/settings.xml
+    echo "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\"
+              xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+              xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0
+                                  https://maven.apache.org/xsd/settings-1.0.0.xsd\">
+      <servers>
+        <server>
+          <id>EYComply</id>
+          <username>fso-to</username>
+          <password>$(vstsMavenAccessToken)</password>
+        </server>
+      </servers>
+    </settings>" >> ~/.m2/settings.xml
+    elif [ -d ~/.m2 ]
+    then
+    echo ".m2 directory exists, but settings.xml file does not exist, creating settings.xml file"
+    echo "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\"
+              xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+              xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0
+                                  https://maven.apache.org/xsd/settings-1.0.0.xsd\">
+      <servers>
+        <server>
+          <id>EYComply</id>
+          <username>fso-to</username>
+          <password>###</password>
+        </server>
+      </servers>
+    </settings>" >> ~/.m2/settings.xml
+    else
+    echo ".m2 directory does not exist, creating .m2 directory"
+    mkdir ~/.m2
+    echo "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\"
+              xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"
+              xsi:schemaLocation=\"http://maven.apache.org/SETTINGS/1.0.0
+                                  https://maven.apache.org/xsd/settings-1.0.0.xsd\">
+      <servers>
+        <server>
+          <id>EYComply</id>
+          <username>fso-to</username>
+          <password>$(vstsMavenAccessToken)</password>
+        </server>
+      </servers>
+    </settings>" >> ~/.m2/settings.xml
+    fi
+  displayName: 'Maven: concat Maven Access Token'
+  condition: and(succeeded(), eq(variables.IS_MAVEN, 'true'))
+  enabled: false
+
+- task: MavenAuthenticate@0
+  displayName: 'Authenticate Maven feed'
+  inputs:
+    artifactsFeeds: EYComply
+
+- task: Maven@3
+  displayName: 'Maven: build'
+  inputs:
+    mavenPomFile: '$(POMXML_FILE)'
+    goals: 'clean install org.jacoco:jacoco-maven-plugin:prepare-agent verify'
+    options: '-e'
+    publishJUnitResults: false
+    sonarQubeRunAnalysis: true
+    javaHomeOption: 'JDKVersion'
+    jdkVersionOption: '1.17'
+  condition: and(succeeded(), eq(variables.IS_MAVEN, 'true'))
+
+- ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - script: |
+        cd $(POMXML_DIRECTORY)/target/
+        ls $(POMXML_DIRECTORY)/target/
+        cp $(build.artifactstagingdirectory)/build.var .
+        zip -r backend.zip ./*
+      displayName: 'Maven: compress artifact'
+      condition: and(succeeded(), eq(variables.IS_MAVEN, 'true'))

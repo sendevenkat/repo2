@@ -1,0 +1,33 @@
+FROM debian:bullseye-slim
+
+RUN groupadd -g 1000 clamav
+RUN useradd -u 1000 -g 1000 clamav
+
+RUN apt-get update && apt-get install -y \
+    clamav clamav-daemon \
+    less net-tools && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN echo "TCPSocket 8080" >> /etc/clamav/clamd.conf && \
+    echo "StreamMinPort 1024" >> /etc/clamav/clamd.conf && \
+    echo "StreamMaxPort 2048" >> /etc/clamav/clamd.conf && \
+    sed -i 's/^LogSyslog.*/LogSyslog true/g' /etc/clamav/clamd.conf && \
+    sed -i 's/^LogVerbose.*/LogVerbose true/g' /etc/clamav/clamd.conf && \
+    sed -i 's/^StreamMaxLength.*/StreamMaxLength 60M/g' /etc/clamav/clamd.conf && \
+    sed -i 's/^MaxScanSize.*/MaxScanSize 1024M/g' /etc/clamav/clamd.conf && \
+    sed -i 's/^MaxFileSize.*/MaxFileSize 1024M/g' /etc/clamav/clamd.conf && \
+    sed -i 's/^Debug.*/Debug true/g' /etc/clamav/clamd.conf
+
+RUN freshclam
+RUN (crontab -l -u clamav ; echo "00 03 * * * /usr/bin/freshclam") | crontab -u clamav -
+
+EXPOSE 8080
+EXPOSE 1024-2048
+
+RUN mkdir /var/run/clamav && chown clamav:clamav /var/run/clamav && chmod u+s /usr/sbin/cron
+
+COPY entrypoint.sh /entrypoint.sh
+RUN chown clamav:clamav /entrypoint.sh && chmod +x /entrypoint.sh
+ADD environment.var /
+USER 1000
+ENTRYPOINT ["/entrypoint.sh"]

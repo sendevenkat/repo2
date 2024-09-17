@@ -1,0 +1,180 @@
+##Prerequisites: all configmap files must already exist in the respective repo (eyc-cm-nonprod/eyc-cm-prod)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - qa36
+  - qa37
+  - qabcm
+  - perftest
+  - uat
+  - prod
+
+- name: artifact
+  displayName: "Artifact"
+  type: string
+  default: develop
+  values:
+  - develop
+  - release
+  - epic
+  - prod
+
+- name: svcList
+  displayName: List of microservices to deploy
+  type: object
+  default:
+  - audit
+  - authentication
+  - authorization
+  - boardreporting
+  - camundawrapper
+  - comments
+  - configuration
+  - discovery
+  - dlqprocessor
+  - dmsdataintake
+  - document
+  - download
+  - gateway
+  - logging
+  - metadata
+  - notificationengine
+  - notificationclient
+  - notifieragent
+  - rrcollaboration
+  - regreporting
+  - sbadmin
+  - sendoutengine
+  - taxreporting
+  - tracker
+  - zipkin
+  - zipkinui
+
+- name: deployConfigmaps
+  displayName: "Deploy configmaps too?"
+  type: boolean
+  default: false
+
+- name: deployFrontend
+  displayName: "Deploy frontend?"
+  type: boolean
+  default: false
+
+- name: version
+  displayName: "Frontend version"
+  type: string
+  default: gs
+  values:
+  - dms
+  - gs
+  - pimco2
+  - trms
+  - trp
+
+variables:
+- template: ../../../variables/clusters.yml
+- template: ../../../variables/resource-groups.yml
+- template: ../../../variables/subscriptions.yml
+- name: var_namespace
+  ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    value: "eycomply"
+  ${{ else }}:
+    value: "${{ parameters.environment }}"
+
+jobs:
+- job: Frontend
+  condition: eq('${{ parameters.deployFrontend }}', 'true')
+  steps:
+  #Create empty configmap
+  - task: AzureCLI@2
+    displayName: 'Create empty UI configmap'
+    inputs:
+      azureSubscription: $(${{ parameters.environment }}-sub)
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+        kubectl create configmap ${{ parameters.environment }}uiconfig -n $(var_namespace) --from-literal=key1=config1 -o yaml --dry-run=client | kubectl apply --force -f -
+      addSpnToEnvironment: true
+      useGlobalConfig: true
+
+  #Trigger deployment of UI - Don't wait
+  - task: TriggerBuild@3
+    displayName: Deploy UI
+    inputs:
+      definitionIsInCurrentTeamProject: true
+      buildDefinition: 'EYC2-Deploy-Frontend'
+      queueBuildForUserThatTriggeredBuild: true
+      ignoreSslCertificateErrors: false
+      useSameSourceVersion: false
+      useCustomSourceVersion: false
+      useSameBranch: true #Leave as true to use pipelineupdate
+      waitForQueuedBuildsToFinish: false
+      storeInEnvironmentVariable: false
+      templateParameters: "environment: ${{ parameters.environment }}, artifact: ${{ parameters.artifact }}, version: ${{ parameters.version }}"
+      authenticationMethod: 'OAuth Token'
+      password: '$(System.AccessToken)'
+      enableBuildInQueueCondition: false
+      dependentOnSuccessfulBuildCondition: false
+      dependentOnFailedBuildCondition: false
+      checkbuildsoncurrentbranch: false
+      failTaskIfConditionsAreNotFulfilled: false
+
+- job: Backend
+  steps:
+  - ${{ each svc in parameters.svcList }}:
+    #Trigger configmap pipeline - wait for completion
+    - task: TriggerBuild@3
+      displayName: Deploy ${{ svc }} configmap
+      condition: eq('${{ parameters.deployConfigmaps }}', 'true')
+      inputs:
+        definitionIsInCurrentTeamProject: true
+        buildDefinition: 'EYC2-Deploy-ConfigMap'
+        queueBuildForUserThatTriggeredBuild: true
+        ignoreSslCertificateErrors: false
+        useSameSourceVersion: false
+        useCustomSourceVersion: false
+        useSameBranch: true
+        waitForQueuedBuildsToFinish: true
+        storeInEnvironmentVariable: false
+        templateParameters: "environment: ${{ parameters.environment }}, microservice: ${{ svc }}"
+        authenticationMethod: 'OAuth Token'
+        password: '$(System.AccessToken)'
+        enableBuildInQueueCondition: false
+        dependentOnSuccessfulBuildCondition: false
+        dependentOnFailedBuildCondition: false
+        checkbuildsoncurrentbranch: false
+        failTaskIfConditionsAreNotFulfilled: false
+
+    #Trigger deployment of microservice - Don't wait in case one of them fails
+    - task: TriggerBuild@3
+      displayName: Deploy ${{ svc }}service
+      inputs:
+        definitionIsInCurrentTeamProject: true
+        buildDefinition: 'EYC2-Deploy-Backend'
+        queueBuildForUserThatTriggeredBuild: true
+        ignoreSslCertificateErrors: false
+        useSameSourceVersion: false
+        useCustomSourceVersion: false
+        useSameBranch: true
+        waitForQueuedBuildsToFinish: false
+        storeInEnvironmentVariable: false
+        templateParameters: "environment: ${{ parameters.environment }}, microservice: ${{ svc }}, artifact: ${{ parameters.artifact }}"
+        authenticationMethod: 'OAuth Token'
+        password: '$(System.AccessToken)'
+        enableBuildInQueueCondition: false
+        dependentOnSuccessfulBuildCondition: false
+        dependentOnFailedBuildCondition: false
+        checkbuildsoncurrentbranch: false
+        failTaskIfConditionsAreNotFulfilled: false

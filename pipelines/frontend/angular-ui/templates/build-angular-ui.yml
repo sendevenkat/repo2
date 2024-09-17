@@ -1,0 +1,212 @@
+parameters:
+- name: environment
+  type: string
+- name: microservice
+  type: string
+- name: branch
+  type: string
+
+jobs:
+- job: BuildUI
+  variables:
+  - template: ../../../../variables/repos.yml
+  steps:
+  - checkout: self
+  - checkout: eyc-cm-nonprod
+  - checkout: eyc-cm-prod
+  - ${{ if eq(parameters.microservice, 'dlqprocessorui') }}:
+    - checkout: eycomply-dlq-processor-ui
+      path: ${{ parameters.microservice }}      
+  # - ${{ if eq(parameters.microservice, 'trackerui') }}:
+  #   - checkout: eycomply-tracker-ui
+  #     path: ${{ parameters.microservice }}
+  # - ${{ if eq(parameters.microservice, 'auditui') }}:
+  #   - checkout: eycomply-audit-trial-ui
+  #     path: ${{ parameters.microservice }}
+
+  - script: |
+      set -x
+      cd $(Build.SourcesDirectory)/$(CONFIGMAPREPONAME)
+      API_URL_VALUE=$(grep "^API_URL=" "${{ parameters.environment }}env.properties" | awk -F= '{print $2}' | head -1)
+      echo "##vso[task.setvariable variable=API_URL]$API_URL_VALUE"
+    displayName: 'Read config map and set build variables'
+    enabled: true
+
+  - script: |
+      set -x
+      echo API_URL is "$API_URL"
+      cd $(Build.SourcesDirectory)/../${{ parameters.microservice }}
+      sed -i "s|{{API_URL}}|$API_URL|g" ./src/environments/environment.prod.ts
+      sed -i "s|{{API_URL}}|$API_URL|g" ./src/environments/environment.ts
+    displayName: 'Replace variables in files'
+    enabled: true
+
+  - script: |
+      set -x
+      cd $(Build.SourcesDirectory)/../${{ parameters.microservice }}
+      rm -rf package-lock.json
+      rm -rf node_modules
+    displayName: 'remove package-lock.json file'
+    enabled: false
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '18.x'
+    displayName: 'Install Node.js'
+
+  - script: |
+      set -x
+      cd $(Agent.BuildDirectory)/${{ parameters.microservice }}
+      npm install -g @angular/cli
+      npm install --legacy-peer-deps
+      ng build --output-path=dist --base-href=/$(PORTAL)/$(MICROSVC)/
+    displayName: 'npm install and build'
+
+  - script: |
+      cd $(Build.SourcesDirectory)/../${{ parameters.microservice }}
+      echo "##vso[task.setvariable variable=BuildBranchName]$(BRANCH_REF)"
+      echo "##vso[task.setvariable variable=BuildCommitId]$(git rev-parse HEAD)"
+      echo "##vso[task.setvariable variable=BuildRepositoryUrl]$(git config --get remote.origin.url)"
+   
+    displayName: 'Set build variables'
+  
+  - script: |
+      cd $(build.artifactstagingdirectory)
+      echo '------------------------CODE DETAILS-----------------------------' >> build.var
+      echo 'Repository is on: '$(Build.Repository.Provider) |tee -a build.var
+      echo 'Repository URL is: '$(BuildRepositoryUrl) |tee -a build.var
+      echo 'Source branch name is: '$(BuildBranchName) |tee -a build.var
+      echo 'Commit is: '$(BuildCommitId) |tee -a build.var
+
+      echo build.var file contains:
+      cat build.var
+
+      echo "branch" > ARTIFACT_VERSION.var
+
+      cp build.var $(Agent.BuildDirectory)/${{ parameters.microservice }}/dist/
+      cp ARTIFACT_VERSION.var $(Agent.BuildDirectory)/${{ parameters.microservice }}/dist/
+
+    displayName: 'Save code details'
+
+  - publish: $(Agent.BuildDirectory)/${{ parameters.microservice }}/dist
+    artifact: dist
+
+- job: CreateImage
+  dependsOn: BuildUI
+  steps:
+  - script: |
+      cd $(Build.SourcesDirectory)
+      mkdir -p dockerdir/dist
+    displayName: 'Prepare directory for container files'
+    enabled: true
+
+  - task: DownloadPipelineArtifact@2
+    inputs:
+      artifact: 'dist'
+      path: $(Build.SourcesDirectory)/dockerdir/dist
+
+  - script: |
+      find $(System.DefaultWorkingDirectory)
+      echo "##vso[task.setvariable variable=DOCKER_FILE]Dockerfile.angular"
+    displayName: 'Set DOCKER_FILE'
+
+  - script: |
+      sed -i "s|{{ENV}}|${{ parameters.environment }}|g" ./pipelines/frontend/angular-ui/Dockerfile.angular
+      sed -i "s|{{JAVA_HOME_DOCKER}}|$(JAVA_HOME_DOCKER)|g" ./pipelines/frontend/angular-ui/Dockerfile.angular
+      sed -i "s|{{CATALINA_HOME}}|$(CATALINA_HOME)|g" ./pipelines/frontend/angular-ui/Dockerfile.angular
+    displayName: 'Prepare Dockerfile'
+    enabled: true
+
+  - script: |
+      cp ./pipelines/frontend/angular-ui/Dockerfile.angular $(Build.SourcesDirectory)/dockerdir/
+      cp ./pipelines/frontend/docker-compose.yml $(Build.SourcesDirectory)/dockerdir/
+    displayName: 'Copy files to dockerdir'
+
+  - script: |
+      cd $(Build.SourcesDirectory)/dockerdir/dist
+      echo '------------------------RELEASE DETAILS--------------------------' |tee -a environment.var
+      echo 'Artifact version is: '$(grep "Source branch name is:" build.var | awk -F': ' '{print $2}')
+      echo 'Microservice is: '${{ parameters.microservice }} |tee -a environment.var
+      echo 'Environment is: '${{ parameters.environment }} |tee -a environment.var
+      echo 'BuildId: '$(Build.BuildId)
+      echo 'Build.BuildNumber: '$(Build.BuildNumber)
+      echo 'Build.DefinitionVersion: '$(Build.DefinitionVersion)
+      echo 'Queued by: '"$(Build.QueuedBy)" |tee -a environment.var
+      echo 'Time: '$(date) |tee -a environment.var      
+      echo 'Build was: '$(Build.Reason)
+
+      cat build.var |tee -a environment.var
+
+      echo '------------------------DevOps DETAILS---------------------------' |tee -a environment.var
+      echo 'Repository is on: '$(Build.Repository.Provider) |tee -a environment.var
+      echo 'Repository URL is: '$(Build.Repository.Uri) |tee -a environment.var
+      echo 'Source branch is: '$(Build.SourceBranch)
+      echo 'Source branch name is: '$(Build.SourceBranchName) |tee -a environment.var
+      echo 'Commit is: ''$(Build.SourceVersion)' |tee -a environment.var
+      echo 'Commit message was: ''$(Build.SourceVersionMessage)' |tee -a environment.var
+      echo 'BUILD_FILE_NAME is: null' |tee -a environment.var
+      echo 'Docker Image generated on: '$(date) |tee -a environment.var
+      echo 'Docker Image is: '$(DOCKER_IMAGE_PATH) |tee -a environment.var
+      echo
+        
+      echo environment.var file contains:
+      cat environment.var
+    displayName: 'Display and save variables'
+    condition: succeededOrFailed()
+    continueOnError: true
+
+  - task: Docker@2
+    displayName: 'Build image'
+    inputs:
+      containerRegistry: 'EYC jFrog Docker Registry'
+      repository: ui/other/${{ parameters.microservice }}
+      command: build
+      Dockerfile: $(Build.SourcesDirectory)/dockerdir/$(DOCKER_FILE)
+      tags: $(BUILD_VAR)
+
+  - ${{ if or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+      - template: ../../../common-templates/aqua-scanning.yml
+        parameters:
+          aquasecLogin: AquaSecRegistry-SAAS-EYComply-NonProd
+          aquasecAcr: acemnlpaquacr01
+          aquasecScannerConn: AquaSecConsole-SAAS-EYComply-NonProd
+          imagePath: '$(DOCKER_IMAGE_PATH)'
+
+  - ${{ else }}:
+      - template: ../../../common-templates/aqua-scanning.yml
+        parameters:
+          aquasecLogin: AquaSecRegistry-SAAS-EYComply-PROD
+          aquasecAcr: acemnlpaquacr01
+          aquasecScannerConn: AquaSecConsole-SAAS-EYComply-PROD
+          imagePath: '$(DOCKER_IMAGE_PATH)'
+
+  - ${{ if eq(variables['Build.Reason'], 'Manual') }}:
+    - task: JFrog.jfrog-artifactory-vsts-extension.artifactory-docker.ArtifactoryDocker@1
+      displayName: 'Push Docker image to jFrog Artifactory'
+      inputs:
+        artifactoryService: 'EYC jFrog Artifactory - Docker'
+        targetRepo: '$(DOCKER_REPO)'   
+        imageName: '$(DOCKER_IMAGE_PATH)'
+
+
+  - script: |
+      echo 'Microservice is: '$(MICROSVC)
+      echo 'Environment is: '${{ parameters.environment }}
+      echo 'Branch is: ' ${{ parameters.branch }}
+      echo -----------------------------------------------
+      echo 'DOCKER_FILE is: ' $(DOCKER_FILE)
+      echo -----------------------------------------------
+      echo Build.SourcesDirectory is in $(Build.SourcesDirectory) and the files in there are:
+      ls $(Build.SourcesDirectory)
+      echo -----------------------------------------------
+      echo 'Build.BuildNumber: '$(Build.BuildNumber)
+      echo 'Build.DefinitionVersion: '$(Build.DefinitionVersion)
+      echo 'Build.DefinitionVersion: '$(Build.DefinitionVersion)
+      echo 'Queued by: '"$(Build.QueuedBy)"
+      echo 'Queued by ID: '$(Build.QueuedById)
+      echo 'Build was: '$(Build.Reason)
+    displayName: 'Display variables'
+    condition: succeededOrFailed()
+
+  - publish: $(Build.SourcesDirectory)/dockerdir/dist
+    artifact: artifact

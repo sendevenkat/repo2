@@ -1,0 +1,39 @@
+trigger: none
+pr: none
+
+pool:
+  name: EYC Pipeline
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: Regression
+    values:
+    - Regression
+    - UAT
+
+steps:
+- task: QualysWASConnector@6
+  displayName: 'Qualys WAS UAT Scan'
+  inputs:
+    webApplication: '1008548851-EY Comply - UAT'
+    scanType: 'VULNERABILITY'
+    authenticationRecord: 'Other'
+    authRecordName: '1992109'
+    dataCheckFrequency: '5'
+    waitTimeforScanResult: '60*24'
+    WasService: 'Qualys-EYComply'
+  condition: eq( '${{ parameters.environment }}', 'UAT')
+
+- task: QualysWASConnector@6
+  displayName: 'Qualys WAS QA Scan'
+  inputs:
+    webApplication: '1008548852-EY Comply - QA'
+    scanType: 'VULNERABILITY'
+    authenticationRecord: 'Other'
+    authRecordName: '1984318'
+    dataCheckFrequency: '5'
+    waitTimeforScanResult: '60*24'
+    WasService: 'Qualys-EYComply'
+  condition: and(succeeded(), eq('${{ parameters.environment }}', 'Regression'))

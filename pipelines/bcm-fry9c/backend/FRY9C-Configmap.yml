@@ -1,0 +1,122 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+resources:
+  repositories:
+  - repository: eyc-cm-nonprod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-nonprod
+  - repository: eyc-cm-prod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-prod
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: qa33
+    values:
+    - qa33
+    - prod
+
+  - name: microservice
+    displayName: "Microservice"
+    type: string
+    default: fry9c
+    values:
+    - fry9c
+    - fry9cui
+    - fry9cdataload
+
+  - name: restart
+    displayName: "Restart app and apply changes"
+    type: boolean
+    default: false
+  
+  - name: namespace
+    displayName: "AKS Namespace"
+    type: string
+    default: fry9c
+    values:
+    - fry9c
+
+variables:
+- template: ../../../variables/clusters.yml
+- template: ../../../variables/resource-groups.yml
+- template: ../../../variables/subscriptions.yml
+- template: ../../../variables/repos.yml
+- group: eyc-sqlmipwd
+
+- name: var_namespace
+  value: "${{ parameters.namespace }}"
+
+steps:
+- checkout: self
+- checkout: eyc-cm-nonprod
+- checkout: eyc-cm-prod
+
+- script: |
+    az pipelines runs tag add --organization $(System.TeamFoundationCollectionUri) --project $(System.TeamProjectId) --run-id $(Build.BuildId) --tag "Environment: ${{ parameters.environment }}, Service: ${{ parameters.microservice }}service, App Restart Done: ${{ parameters.restart }}, Queued By: $(Build.QueuedBy)"
+  displayName: 'Tag pipeline run'
+  env:
+    AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+  condition: succeededOrFailed()
+
+- task: Bash@3
+  displayName: 'Replace SQL MI password, ENV, and MSVC keywords in Configfile'
+  inputs:
+    targetType: 'inline'
+    script: |
+      cd $(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/
+      if grep -q FRY9CSQLMI-PWD "${{ parameters.environment }}fry9cenv.properties"; then
+        sed -i 's%FRY9CSQLMI-PWD%$(${{ parameters.environment }}-fry9csqlmipwd)%g' ${{ parameters.environment }}fry9cenv.properties
+        echo FRY9CSQLMI-PWD replaced in ${{ parameters.microservice }}fry9cenv.properties
+        cat ${{ parameters.environment }}fry9cenv.properties
+      fi
+  enabled: true
+  
+#Take one file for each environment and apply it to the UNIQUE configmap in the environment --- DONE
+- task: AzureCLI@2
+  displayName: 'Apply Configmap ${{ parameters.environment }}config'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+     kubectl create configmap ${{ parameters.environment }}serviceconfig -n $(var_namespace) --from-env-file=$(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/${{ parameters.environment }}fry9cenv.properties -o yaml --dry-run=client  | kubectl apply --force -f -
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+
+#have the option to restart just one microservice
+- task: AzureCLI@2
+  displayName: 'Restarting POD ${{ parameters.environment }}${{ parameters.microservice }}service'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+     replicaCount=$(kubectl get pods --selector=app=${{ parameters.environment }}-deploy-${{ parameters.microservice }}service -n $(var_namespace) | wc -l)
+     replicaCount=$(($replicaCount-1)) 
+     echo "The Replica Count is: $replicaCount"
+     echo Restarting eycomplyapp-${{ parameters.environment }}-deploy-${{ parameters.microservice }}service in namespace $(var_namespace)
+     kubectl rollout restart deployment eycomplyapp-${{ parameters.environment }}-deploy-${{ parameters.microservice }}service -n $(var_namespace)
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+  enabled: ${{ parameters.restart }}
+
+#"$(${{ parameters.environment }}-cluster)" - This is the akscluster
+#"$(${{ parameters.environment }}-rg)" - This is Resource group
+#"$(${{ parameters.environment }}-sub)" - This is subscription
+#"$(${{ parameters.environment }}--sqlmipwd)" - This is sql mi password
+
+
+#--------------------------------------------------------------------------------------------------------

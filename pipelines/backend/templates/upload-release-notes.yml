@@ -1,0 +1,64 @@
+parameters:
+- name: environment
+  type: string
+- name: microservice
+  type: string
+
+steps:
+  - task: PowerShell@2
+    inputs:
+      targetType: inline
+      script: | 
+        ls
+        Get-ChildItem -Path /home/vsts/work
+        Get-Location
+        Install-Module -Name PnP.PowerShell -Force -Verbose -Scope CurrentUser 
+        #Site collection URL
+        $SiteURL = "https://sites.ey.com/teams/EYComply-DEV"
+        $Time = Get-Date -UFormat "%R" | ForEach-Object { $_ -replace ":", "" }
+        $Year = Get-Date -UFormat "%Y"
+        $Month = Get-Date -UFormat "%m"
+        $Date = Get-Date -UFormat "%d"
+        $ArtifactVersion=Get-Content /home/vsts/work/1/artifact/ARTIFACT_VERSION.var
+        $FileName = "${{parameters.environment}}"+"-"+"${{parameters.microservice}}"+"-"+$Year+$Month+$Date+"-"+${Time}+"-"+"utc"+"-version-"+$ArtifactVersion+".txt"
+        #Connect to SharePoint Online with AppId and AppSecret
+        Connect-PnPOnline -Url $SiteURL -ClientId "869db586-4290-4cab-90d1-9f66f1213981" -ClientSecret "YzFkZjNjYzEtMDBkZS00MGYwLWI1NzEtYWQ1YzkzY2VkMDgw"
+        #Relative Path of the Library
+        $DestinationPath = "Releases/"
+        $SourceFilePath ="/home/vsts/work/1/artifact/environment.var"
+        Rename-Item -Path $SourceFilePath -NewName $FileName
+        $SourceFilePath ="/home/vsts/work/1/artifact/"+$FileName
+        #Upload File to SharePoint Online Library
+        Add-PnPFile -Path $SourceFilePath -Folder $DestinationPath
+    displayName: 'Release Notes Upload to Sharepoint'
+    condition: and(succeeded(), not(in('${{ parameters.microservice }}', 'zipkin', 'zipkinui', 'clamav')))
+    enabled: true
+
+  - task: PowerShell@2
+    inputs:
+      targetType: inline
+      script: | 
+        ls
+        Get-ChildItem -Path /home/vsts/work
+        Get-Location
+        Install-Module -Name PnP.PowerShell -Force -Verbose -Scope CurrentUser 
+        #Site collection URL
+        $SiteURL = "https://sites.ey.com/teams/EYComply-DEV"
+        $Time = Get-Date -UFormat "%R" | ForEach-Object { $_ -replace ":", "" }
+        $Year = Get-Date -UFormat "%Y"
+        $Month = Get-Date -UFormat "%m"
+        $Date = Get-Date -UFormat "%d"
+        $ArtifactVersion= ""
+        $FileName = "${{parameters.environment}}"+"-"+"${{parameters.microservice}}"+"-"+$Year+$Month+$Date+"-"+${Time}+"-"+"utc"+"-version-"+$ArtifactVersion+".txt"
+        #Connect to SharePoint Online with AppId and AppSecret
+        Connect-PnPOnline -Url $SiteURL -ClientId "869db586-4290-4cab-90d1-9f66f1213981" -ClientSecret "YzFkZjNjYzEtMDBkZS00MGYwLWI1NzEtYWQ1YzkzY2VkMDgw"
+        #Relative Path of the Library
+        $DestinationPath = "Releases/"
+        $SourceFilePath ="/home/vsts/work/1/artifact/environment.var"
+        Rename-Item -Path $SourceFilePath -NewName $FileName
+        $SourceFilePath ="/home/vsts/work/1/artifact/"+$FileName
+        #Upload File to SharePoint Online Library
+        Add-PnPFile -Path $SourceFilePath -Folder $DestinationPath
+    displayName: 'Release Notes Upload to Sharepoint'
+    condition: and(succeeded(), eq('${{ parameters.microservice }}', 'clamav'))
+    enabled: true

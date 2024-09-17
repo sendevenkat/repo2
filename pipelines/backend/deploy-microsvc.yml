@@ -1,0 +1,194 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+resources:
+  repositories:
+  - repository: eycomply-releases-qa
+    name: ey-org/eycomply-releases
+    type: github
+    endpoint: emu-service-connection
+    ref: QA
+
+  - repository: eycomply-releases-uat
+    name: ey-org/eycomply-releases
+    type: github
+    endpoint: emu-service-connection
+    ref: UAT
+
+  - repository: eycomply-releases-prod
+    name: ey-org/eycomply-releases
+    type: github
+    endpoint: emu-service-connection
+    ref: PROD
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - qa36
+  - qa37
+  - qabcm
+  - perftest
+  - uat
+  - prod
+  - prod-dr
+
+- name: microservice
+  displayName: "Microservice"
+  type: string
+  default: authentication
+  values:
+  - audit
+  - authentication
+  - authorization
+  - bcmconfigurationrules
+  - bcmregmonitoring
+  - bcmregreporting
+  - boardreporting
+  - camundawrapper
+  - clamav
+  - comments
+  - configuration
+  - configserver
+  - dataprovider
+  - dlqprocessor
+  - dmsdataintake
+  - document
+  - download
+  - expensereporting
+  - finreport
+  - frpdfextraction
+  - gateway
+  - logging
+  - metadata
+  - notifieragent
+  - outboundgateway
+  - pbireport
+  - rrcollaboration
+  - regreporting
+  - sbadmin
+  - standardizergateway
+  - taxreporting
+  - topsides
+  - tracker
+  - zipkin
+  - zipkinui
+
+- name: branch_artifact_selector
+  displayName: Deploy
+  type: string
+  default: branch
+  values:
+  - branch
+  - artifact
+  - release
+
+- name: branch_artifact_value
+  displayName: Branch or artifact name or release file
+  type: string
+  default: develop
+
+- name: apply_configmap
+  displayName: "Deploy Configmap"
+  type: boolean
+  default: true
+
+- name: deployFunction
+  displayName: "TRMS - Deploy functions (Requires deploying download service)"
+  type: boolean
+  default: false
+
+
+variables:
+- name: DOCKER_BUILDKIT
+  value: 1
+# Global variables
+- template: ../../variables/environment-global.yml
+  parameters:
+    environment: "${{ parameters.environment }}"
+    microservice: "${{ parameters.microservice }}"
+
+# Environment-specific variables
+- ${{ if eq(parameters.environment, 'prod') }}:
+  - template: ../../variables/environment-prod.yml
+    parameters:
+      microservice: "${{ parameters.microservice }}"
+- ${{ elseif eq(parameters.environment, 'prod-dr') }}:
+  - template: ../../variables/environment-prod-dr.yml
+    parameters:
+      microservice: "${{ parameters.microservice }}"
+- ${{ elseif eq(parameters.environment, 'uat') }}:
+  - template: ../../variables/environment-uat.yml
+    parameters:
+      microservice: "${{ parameters.microservice }}"
+- ${{ elseif eq(parameters.environment, 'qabcm') }}:
+  - template: ../../variables/environment-qabcm.yml
+    parameters:
+      microservice: "${{ parameters.microservice }}"
+- ${{ else }}:
+  - template: ../../variables/environment-dev.yml
+    parameters:
+      microservice: "${{ parameters.microservice }}"
+
+stages:
+- stage: Build${{ upper(variables.ENV_CLASS) }}
+  condition: and(succeeded(), ne('${{ parameters.branch_artifact_selector }}', 'release'))
+  jobs:
+  - template: templates/build-stage.yml
+    parameters:
+      environment: "${{ parameters.environment }}"
+      microservice: "${{ parameters.microservice }}"
+      branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+      branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+
+- stage: Deploy${{ upper(variables.ENV_CLASS) }}
+  dependsOn: Build${{ upper(variables.ENV_CLASS) }}
+  condition: and(succeeded(),ne('${{ parameters.branch_artifact_selector }}', 'release'))
+  variables:
+  - template: ../../variables/load-balancers.yml
+  - template: ../../variables/ingress-rewrites.yml
+  jobs:
+  - template: templates/deploy-stage.yml
+    parameters:
+      environment: "${{ parameters.environment }}"
+      microservice: "${{ parameters.microservice }}"
+      branch_artifact_selector: "${{ parameters.branch_artifact_selector }}"
+      branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+      configmap: "${{ parameters.apply_configmap }}"
+      deployFunction: "${{ parameters.deployFunction }}"
+      adoEnv: $(ADO_ENV)
+
+
+- stage: BuildAndDeployFrom${{ upper(variables.ENV_CLASS) }}_Release_file
+  condition: eq('${{ parameters.branch_artifact_selector }}', 'release')
+  jobs:
+  - job: ReadCSVJob
+    displayName: "Read CSV and Set Variables"
+    steps:
+    - checkout: self
+    - checkout: eycomply-releases-qa
+      condition: in('${{ parameters.environment }}', 'qa33', 'qa36', 'qa37', 'qabcm', 'perftest')
+    - checkout: eycomply-releases-uat
+      condition: eq('${{ parameters.environment }}', 'uat')
+    - checkout: eycomply-releases-prod
+      condition: in('${{ parameters.environment }}', 'prod', 'prod-dr')
+
+    - task: Bash@3
+      inputs:
+        failOnStderr: true
+        filePath: eycomply-base/scripts/build-and-deploy-from-release-file.sh
+      env:
+        accessToken: $(System.AccessToken)
+        apply_configmap: "${{ parameters.apply_configmap }}"
+        branch_artifact_value: "${{ parameters.branch_artifact_value }}"
+        environment: "${{ parameters.environment }}"
+      displayName: "Build and deploy from release File"
+      enabled: true

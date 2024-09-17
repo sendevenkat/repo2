@@ -1,0 +1,536 @@
+#name: $(Build.QueuedBy)_${{ parameters.environment }}_${{ parameters.microservice }}_${{ parameters.branch_artifact_selector }}_$(Date:yyyyMMdd)$(Rev:.r)
+
+resources:
+  repositories:
+  - repository: eyc-cm-nonprod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-nonprod
+  - repository: eyc-cm-prod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-prod
+
+trigger: none
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environment
+    displayName: "Environment"
+    type: string
+    default: qa33
+    values:
+    - qa33
+    - qa36
+    - qa37
+    - qabcm
+    - perftest
+    - uat
+    - prod
+    - prod-dr
+
+  - name: microservice
+    displayName: "Microservice"
+    type: string
+    default: authorization
+    values:
+    - audit
+    - auditui
+    - authentication
+    - authorization
+    - bcmconfigurationrules
+    - bcmregmonitoring
+    - bcmregreporting
+    - boardreporting
+    - clamav
+    - comments
+    - configuration
+    - configserver
+    - dataprovider
+    - discovery
+    - dlqprocessor
+    - dlqprocessorui
+    - dmsdataintake
+    - document
+    - download
+    - expensereporting
+    - finreport
+    - frpdfextraction
+    - gateway
+    - logging
+    - metadata
+    - notificationengine
+    - notificationclient
+    - notifieragent
+    - outboundgateway
+    - pbireport
+    - rrcollaboration
+    - regreporting
+    - sbadmin
+    - sendoutengine
+    - standardizergateway
+    - taxreporting
+    - topsides
+    - tracker
+    - trackerui
+    - camundawrapper
+    - zipkin
+    - zipkinui
+
+  - name: restart
+    displayName: "Restart app and apply changes"
+    type: boolean
+    default: false
+
+#NEW
+  - name: applyall
+    displayName: "Apply to all microservices"
+    type: boolean
+    default: false
+
+
+variables:
+- template: ../../variables/clusters.yml
+- template: ../../variables/resource-groups.yml
+- template: ../../variables/subscriptions.yml
+- template: ../../variables/repos.yml
+- group: eyc-sqlmipwd
+- group: eyc-camunda-details
+- name: var_namespace
+  ${{ if or(eq(parameters.environment, 'qabcm'), startsWith(parameters.microservice, 'bcm')) }}:
+    value: "bcm"
+  ${{ elseif or(startsWith(parameters['environment'], 'qa'), startsWith(parameters['environment'], 'perf'))}}:
+    value: "eycomply"
+  ${{ elseif eq(parameters['environment'], 'prod-dr') }}:
+    value: "prod-dr"
+  ${{ else }}:
+    value: "${{ parameters.environment }}"
+- name: environmentname
+  ${{ if in(parameters['environment'], 'prod', 'prod-dr') }}:
+    value: "prod"
+  ${{ else }}:
+    value: "${{ parameters.environment }}"
+- name: keyvaultname
+  ${{ if eq(parameters['environment'], 'qa33') }}:
+    value: 'USEDEYC003AKV08'
+  ${{ elseif eq(parameters['environment'], 'qa36') }}:
+    value: 'USEDEYC003AKV09'
+  ${{ elseif eq(parameters['environment'], 'qa37') }}:
+    value: 'USEDEYC003AKV0A'
+  ${{ elseif eq(parameters.environment, 'qabcm') }}:
+    value: 'USEDEYC003AKV0D'
+  ${{ elseif eq(parameters['environment'], 'perftest') }}:
+    value: 'USEDEYC003AKV0B'
+  ${{ elseif eq(parameters['environment'], 'uat') }}:
+    value: 'USEUEYC002AKV02'
+  ${{ elseif or(eq(parameters['environment'], 'prod'), eq(parameters['environment'], 'prod-dr')) }}:
+    value: 'USEPEYC002AKV07'
+
+steps:
+- checkout: self
+- checkout: eyc-cm-nonprod
+- checkout: eyc-cm-prod
+
+- task: Bash@3
+  inputs:
+    targetType: inline
+    script: |
+      echo bcmregreporting microservice deployments are only allowed for the qabcm environment. Please rerun the pipeline selecting the right environment. >&2
+      exit 1
+    failOnStderr: true
+  condition: and(startsWith('${{ parameters.microservice }}', 'bcm'), ne('${{ parameters.environment }}', 'qabcm'))
+
+- task: AzureKeyVault@2
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    KeyVaultName: $(keyvaultname)
+    SecretsFilter: '*'
+    RunAsPreJob: true
+
+- task: Bash@3
+  condition: succeeded()
+  displayName: 'Replace KeyVault placeholders in Configmap file' # pipelines/Ad-Hoc-Automation-Pipelines/Configmap-Update/pipeline-update.py references to this name, so don't change it
+  inputs:
+    targetType: 'inline'
+    script: |
+      set -x
+      PROPERTIES_FILE=$(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/${{ variables.environmentname }}env.properties
+      echo "Replacing KeyVault placeholders in Configmap file..."
+      cd $(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/
+
+      sed -i 's|=AE-CONFIG-AAD-CLIENTSECRET$|=$(AE-CONFIG-AAD-CLIENTSECRET)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-AG$|=$(AUDIT-STORAGE-DB-URI-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-GS$|=$(AUDIT-STORAGE-DB-URI-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-PIMCO$|=$(AUDIT-STORAGE-DB-URI-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-TRP$|=$(AUDIT-STORAGE-DB-URI-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-BCMDEMO$|=$(AUDIT-STORAGE-DB-URI-BCMDEMO)|g' $PROPERTIES_FILE
+      sed -i 's|=AUDIT-STORAGE-DB-URI-BCMDEMO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=AZ-EXT-APP-API-KEY$|=$(AZ-EXT-APP-API-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-CONNECTION-STRING-AG$|=$(AZURE-ACCOUNT-CONNECTION-STRING-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-CONNECTION-STRING-GS$|=$(AZURE-ACCOUNT-CONNECTION-STRING-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-CONNECTION-STRING-PIMCO$|=$(AZURE-ACCOUNT-CONNECTION-STRING-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-CONNECTION-STRING-TRP$|=$(AZURE-ACCOUNT-CONNECTION-STRING-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-KEY$|=$(AZURE-ACCOUNT-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-KEY-AG$|=$(AZURE-ACCOUNT-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-KEY-GS$|=$(AZURE-ACCOUNT-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-KEY-PIMCO$|=$(AZURE-ACCOUNT-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-ACCOUNT-KEY-TRP$|=$(AZURE-ACCOUNT-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=AZURE-SERVICEBUS-CONNECTION-STRING$|=$(AZURE-SERVICEBUS-CONNECTION-STRING)|g' $PROPERTIES_FILE
+      sed -i 's|=BR-FUNDS-IN-SCOPE-API-KEY-PIMCO$|=$(BR-FUNDS-IN-SCOPE-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=CACHE-CONFIG-SPRING-REDIS-PASSWORD$|=$(CACHE-CONFIG-SPRING-REDIS-PASSWORD)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-REPORTS-KEY-AG$|=$(DATA-EXCEPTION-REPORTS-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-REPORTS-KEY-GS$|=$(DATA-EXCEPTION-REPORTS-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-REPORTS-KEY-PIMCO$|=$(DATA-EXCEPTION-REPORTS-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-REPORTS-KEY-TRP$|=$(DATA-EXCEPTION-REPORTS-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-SUMMARY-KEY-AG$|=$(DATA-EXCEPTION-SUMMARY-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-SUMMARY-KEY-GS$|=$(DATA-EXCEPTION-SUMMARY-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-SUMMARY-KEY-PIMCO$|=$(DATA-EXCEPTION-SUMMARY-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-EXCEPTION-SUMMARY-KEY-TRP$|=$(DATA-EXCEPTION-SUMMARY-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-API-KEY-AG$|=$(DATA-INTAKE-API-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-API-KEY-GS$|=$(DATA-INTAKE-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-API-KEY-PIMCO$|=$(DATA-INTAKE-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-API-KEY-TRP$|=$(DATA-INTAKE-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-HEADER-API-KEY-GS$|=$(DATA-INTAKE-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-HEADER-API-KEY-PIMCO$|=$(DATA-INTAKE-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DATA-INTAKE-HEADER-API-KEY-TRP$|=$(DATA-INTAKE-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-AG$|=$(DLQ-STORAGE-DB-URI-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-GS$|=$(DLQ-STORAGE-DB-URI-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-PIMCO$|=$(DLQ-STORAGE-DB-URI-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-TRP$|=$(DLQ-STORAGE-DB-URI-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DLQ-STORAGE-DB-URI-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-EXCEPTION-API-KEY-GS$|=$(DMS-CONFIG-FDF-EXCEPTION-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-EXCEPTION-API-KEY-PIMCO$|=$(DMS-CONFIG-FDF-EXCEPTION-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-EXCEPTION-API-KEY-TRP$|=$(DMS-CONFIG-FDF-EXCEPTION-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-HEADER-API-KEY-GS$|=$(DMS-CONFIG-FDF-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-HEADER-API-KEY-PIMCO$|=$(DMS-CONFIG-FDF-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DMS-CONFIG-FDF-HEADER-API-KEY-TRP$|=$(DMS-CONFIG-FDF-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-AZURE-ZIP-FUNCTION-KEY$|=$(DWLD-AZURE-ZIP-FUNCTION-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS$|=$(DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO$|=$(DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP$|=$(DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=DWLD-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=FILING-HEADER-KEY-GS$|=$(FILING-HEADER-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FILING-HEADER-KEY-PIMCO$|=$(FILING-HEADER-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FILING-HEADER-KEY-TRP$|=$(FILING-HEADER-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-ANALYTIC-HEADER-API-KEY-GS$|=$(FR-ANALYTIC-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-ANALYTIC-HEADER-API-KEY-PIMCO$|=$(FR-ANALYTIC-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-ANALYTIC-HEADER-API-KEY-TRP$|=$(FR-ANALYTIC-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-MVALIDATION-HEADER-API-KEY-GS$|=$(FR-MVALIDATION-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-MVALIDATION-HEADER-API-KEY-PIMCO$|=$(FR-MVALIDATION-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-MVALIDATION-HEADER-API-KEY-TRP$|=$(FR-MVALIDATION-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-STRATEGY-HEADER-API-KEY-GS$|=$(FR-STRATEGY-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-STRATEGY-HEADER-API-KEY-PIMCO$|=$(FR-STRATEGY-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-STRATEGY-HEADER-API-KEY-TRP$|=$(FR-STRATEGY-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VAL-DRAFT-CARDS-HEADER-API-KEY-GS$|=$(FR-VAL-DRAFT-CARDS-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VAL-DRAFT-CARDS-HEADER-API-KEY-TRP$|=$(FR-VAL-DRAFT-CARDS-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FDF-HEADER-API-KEY-GS$|=$(FR-VALDN-FDF-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FDF-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-FDF-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FDF-HEADER-API-KEY-TRP$|=$(FR-VALDN-FDF-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-BAR-CHART-HEADER-API-KEY-GS$|=$(FR-VALDN-BAR-CHART-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-BAR-CHART-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-BAR-CHART-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-BAR-CHART-HEADER-API-KEY-TRP$|=$(FR-VALDN-BAR-CHART-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-GS$|=$(FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-TRP$|=$(FR-VALDN-DONUT-STATUS-COUNT-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-GS$|=$(FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-TRP$|=$(FR-VALDN-DRAFT-CARDS-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FILTERS-HEADER-API-KEY-GS$|=$(FR-VALDN-FILTERS-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FILTERS-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-FILTERS-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-FILTERS-HEADER-API-KEY-TRP$|=$(FR-VALDN-FILTERS-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-HEAT-MAP-HEADER-API-KEY-GS$|=$(FR-VALDN-HEAT-MAP-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-HEAT-MAP-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-HEAT-MAP-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-HEAT-MAP-HEADER-API-KEY-TRP$|=$(FR-VALDN-HEAT-MAP-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-GS$|=$(FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-TRP$|=$(FR-VALDN-STATUS-UPDATE-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-GS$|=$(FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-TRP$|=$(FR-VALDN-WF-STATUS-UPDATE-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-SUMMARY-HEADER-API-KEY-GS$|=$(FR-VALDN-WF-SUMMARY-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-SUMMARY-HEADER-API-KEY-PIMCO$|=$(FR-VALDN-WF-SUMMARY-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FR-VALDN-WF-SUMMARY-HEADER-API-KEY-TRP$|=$(FR-VALDN-WF-SUMMARY-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=FUND-SCOPE-API-KEY-GS$|=$(FUND-SCOPE-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=FUND-SCOPE-API-KEY-PIMCO$|=$(FUND-SCOPE-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=FUND-SCOPE-API-KEY-TRP$|=$(FUND-SCOPE-API-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=GATEWAY-IV-STRING$|=$(GATEWAY-IV-STRING)|g' $PROPERTIES_FILE
+      sed -i 's|=GATEWAY-IV-STRING|\&|g' $PROPERTIES_FILE
+      sed -i 's|=GATEWAY-SECRET-KEY$|=$(GATEWAY-SECRET-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=KAFKA-PRODUCER-PROPERTIES-SASL-JAAS-CONFIG$|=$(KAFKA-PRODUCER-PROPERTIES-SASL-JAAS-CONFIG)|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-AG$|=$(LG-STORAGE-DB-URI-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-GS$|=$(LG-STORAGE-DB-URI-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-PIMCO$|=$(LG-STORAGE-DB-URI-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-TRP$|=$(LG-STORAGE-DB-URI-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=LG-STORAGE-DB-URI-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=META-AZURE-COSMOS-KEY$|=$(META-AZURE-COSMOS-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=META-AZURE-SERVICEBUS-CONNECTION-STRING$|=$(META-AZURE-SERVICEBUS-CONNECTION-STRING)|g' $PROPERTIES_FILE
+      sed -i 's|=META-FTP-PASS$|=$(META-FTP-PASS)|g' $PROPERTIES_FILE
+      sed -i 's|=NA-SENDGRID-API-KEY$|=$(NA-SENDGRID-API-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=PBI-CLIENT-SECRET-AG$|=$(PBI-CLIENT-SECRET-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=PBI-CLIENT-SECRET-GS$|=$(PBI-CLIENT-SECRET-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=PBI-CLIENT-SECRET-PIMCO$|=$(PBI-CLIENT-SECRET-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=PBI-CLIENT-SECRET-TRP$|=$(PBI-CLIENT-SECRET-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=PBI-PASSWORD$|=$(PBI-PASSWORD)|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-AG$|=$(PS-STORAGE-DB-URI-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-GS$|=$(PS-STORAGE-DB-URI-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-PIMCO$|=$(PS-STORAGE-DB-URI-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-TRP$|=$(PS-STORAGE-DB-URI-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=PS-STORAGE-DB-URI-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=REPORTING-DB-SPRING-DATASOURCE-PASSWORD-GS$|=$(REPORTING-DB-SPRING-DATASOURCE-PASSWORD-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=REPORTING-DB-SPRING-DATASOURCE-PASSWORD-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=REPORTING-DB-SPRING-DATASOURCE-PASSWORD-PIMCO$|=$(REPORTING-DB-SPRING-DATASOURCE-PASSWORD-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-AG$|=$(RR-CORE-BLOB-SAS-ENDPOINT-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-GS$|=$(RR-CORE-BLOB-SAS-ENDPOINT-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-PIMCO$|=$(RR-CORE-BLOB-SAS-ENDPOINT-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-TRP$|=$(RR-CORE-BLOB-SAS-ENDPOINT-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-ENDPOINT-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-AG$|=$(RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS$|=$(RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO$|=$(RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-PIMCO|\&|g' $PROPERTIES_FILE	  
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP$|=$(RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-BLOB-SAS-TOKEN-FOR-DOWNLOAD-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-AG$|=$(RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-GS$|=$(RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-PIMCO$|=$(RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-TRP$|=$(RR-CORE-CONFIG-FDF-FILING-HEADER-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-AG$|=$(RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-GS$|=$(RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-PIMCO$|=$(RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-TRP$|=$(RR-CORE-CONFIG-FDF-FUND-HEADER-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-ECK-USER-NAME$|=$(RR-ECK-USER-NAME)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-ECK-USER-PASSWORD$|=$(RR-ECK-USER-PASSWORD)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-ECK-API-KEY$|=$(RR-ECK-API-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=RR-EVENT-MONITORING-HEADER-KEY$|=$(RR-EVENT-MONITORING-HEADER-KEY)|g' $PROPERTIES_FILE
+      sed -i 's|=RULE-EXCEPTION-KEY-AG$|=$(RULE-EXCEPTION-KEY-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=RULE-EXCEPTION-KEY-GS$|=$(RULE-EXCEPTION-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=RULE-EXCEPTION-KEY-PIMCO$|=$(RULE-EXCEPTION-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=RULE-EXCEPTION-KEY-TRP$|=$(RULE-EXCEPTION-KEY-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=SCS-GIT-USER-CRED$|=$(SCS-GIT-USER-CRED)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-GS$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-PIMCO$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-TRP$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-CLIENT-SECRET-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-GS$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-PIMCO$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-TRP$|=$(TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=TAX-SERVICE-PRINCIPAL-SHAREPOINT-PASSWORD-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-AG$|=$(TC-STORAGE-DB-URI-AG)|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-AG|\&|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-GS$|=$(TC-STORAGE-DB-URI-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-GS|\&|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-PIMCO$|=$(TC-STORAGE-DB-URI-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-PIMCO|\&|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-TRP$|=$(TC-STORAGE-DB-URI-TRP)|g' $PROPERTIES_FILE
+      sed -i 's|=TC-STORAGE-DB-URI-TRP|\&|g' $PROPERTIES_FILE
+      sed -i 's|=VALIDATION-DESC-HEADER-API-KEY-GS$|=$(VALIDATION-DESC-HEADER-API-KEY-GS)|g' $PROPERTIES_FILE
+      sed -i 's|=VALIDATION-DESC-HEADER-API-KEY-PIMCO$|=$(VALIDATION-DESC-HEADER-API-KEY-PIMCO)|g' $PROPERTIES_FILE
+      sed -i 's|=VALIDATION-DESC-HEADER-API-KEY-TRP$|=$(VALIDATION-DESC-HEADER-API-KEY-TRP)|g' $PROPERTIES_FILE
+
+      cat $PROPERTIES_FILE
+
+- task: Bash@3
+  displayName: 'Replace Camunda credentials in Configfile'
+  inputs:
+    targetType: 'inline'
+    script: |
+      cd $(Build.SourcesDirectory)/$(${{ variables.environmentname }}-repo)/
+      if grep -q EYCCWS-FN "${{ variables.environmentname }}env.properties"; then
+        sed -i 's%EYCCWS-FN%$(${{ variables.environmentname }}-cws-firstname)%g' ${{ variables.environmentname }}env.properties
+        echo EYCCWS-FN replaced in ${{ variables.environmentname }}env.properties
+      fi
+      if grep -q EYCCWS-ID "${{ variables.environmentname }}env.properties"; then
+        sed -i 's%EYCCWS-ID%$(${{ variables.environmentname }}-cws-id)%g' ${{ variables.environmentname }}env.properties
+        echo EYCCWS-ID replaced in ${{ variables.environmentname }}env.properties
+      fi
+      if grep -q EYCCWS-PWD "${{ variables.environmentname }}env.properties"; then
+        sed -i 's%EYCCWS-PWD%$(${{ variables.environmentname }}-cws-pwd)%g' ${{ variables.environmentname }}env.properties
+        echo EYCCWS-PWD replaced in ${{ variables.environmentname }}env.properties
+      fi
+  enabled: true
+
+#2 new if added to replace msvc and env ---- DONE
+- task: Bash@3
+  displayName: 'Replace SQL MI password, ENV, and MSVC keywords in Configfile'
+  inputs:
+    targetType: 'inline'
+    script: |
+      cd $(Build.SourcesDirectory)/$(${{ variables.environmentname }}-repo)/
+      if grep -q EYCSQLMI-PWD "${{ variables.environmentname }}env.properties"; then
+        sed -i 's%EYCSQLMI-PWD%$(${{ variables.environmentname }}-sqlmipwd)%g' ${{ variables.environmentname }}env.properties
+        echo EYCSQLMI-PWD replaced in ${{ variables.environmentname }}env.properties
+      fi
+      if grep -q 3NV1R0NM3N7 "${{ variables.environmentname }}env.properties"; then
+        sed -i 's%3NV1R0NM3N7%$${{ variables.environmentname }}%g' ${{ variables.environmentname }}env.properties
+        echo 3NV1R0NM3N7 replaced in ${{ variables.environmentname }}env.properties
+      fi
+  enabled: true
+
+# merge DR configmap with base configmap
+- ${{ if endsWith(parameters['environment'], '-dr') }}:
+  - task: AzureKeyVault@2
+    inputs:
+      azureSubscription: $(${{ parameters.environment }}-sub)
+      KeyVaultName: UWUPEYC002AKV08
+      SecretsFilter: '*'
+      RunAsPreJob: true
+
+- ${{ if endsWith(parameters['environment'], '-dr') }}:
+  - task: Bash@3
+    condition: succeeded()
+    displayName: 'Replace KeyVault placeholders in DR Configmap file'
+    inputs:
+      targetType: 'inline'
+      script: |
+        set -x
+        PROPERTIES_FILE=$(Build.SourcesDirectory)/$(${{ variables.environmentname }}-repo)/${{ parameters.environment }}.${{ variables.environmentname }}env.properties 
+        echo "Replacing KeyVault placeholders in DR Configmap file..."
+        cd $(Build.SourcesDirectory)/$(${{ variables.environmentname }}-repo)/
+
+        sed -i 's|=DWLD-AZURE-ZIP-FUNCTION-KEY$|=$(DWLD-AZURE-ZIP-FUNCTION-KEY)|g' $PROPERTIES_FILE
+        sed -i 's|=CACHE-CONFIG-SPRING-REDIS-PASSWORD$|=$(CACHE-CONFIG-SPRING-REDIS-PASSWORD)|g' $PROPERTIES_FILE
+        sed -i 's|=AZURE-SERVICEBUS-CONNECTION-STRING$|=$(AZURE-SERVICEBUS-CONNECTION-STRING)|g' $PROPERTIES_FILE
+        sed -i 's|=KAFKA-PRODUCER-PROPERTIES-SASL-JAAS-CONFIG$|=$(KAFKA-PRODUCER-PROPERTIES-SASL-JAAS-CONFIG)|g' $PROPERTIES_FILE
+        sed -i 's|=META-AZURE-SERVICEBUS-CONNECTION-STRING$|=$(META-AZURE-SERVICEBUS-CONNECTION-STRING)|g' $PROPERTIES_FILE
+
+        cat $PROPERTIES_FILE
+
+- ${{ if endsWith(parameters['environment'], '-dr') }}:
+  - task: Bash@3
+    displayName: 'Merge DR configmap'
+    inputs:
+      targetType: 'inline'
+      script: |
+        cd $(Build.SourcesDirectory)/$(${{ variables.environmentname }}-repo)/ 
+        echo >> ${{ parameters.environment }}.${{ variables.environmentname }}env.properties
+
+        while IFS= read -r line; do
+          DR_KEY=${line%%=*}
+          sed -E -i "/^($DR_KEY[[:blank:]]*=[[:blank:]]*).*/d" ${{ variables.environmentname }}env.properties
+        done < "${{ parameters.environment }}.${{ variables.environmentname }}env.properties"
+
+        cat ${{ parameters.environment }}.${{ variables.environmentname }}env.properties >> ${{ variables.environmentname }}env.properties
+        
+    enabled: true
+
+#Take one file for each environment and apply it to the UNIQUE configmap in the environment --- DONE
+- task: AzureCLI@2
+  displayName: 'Apply Configmap for ${{ parameters.environment }}'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+     echo "env is ${{ parameters.environment }} and repo is $(${{ parameters.environment }}-repo) and namespace is $(var_namespace)"
+     kubectl create configmap ${{ variables.environmentname }}serviceconfig -n $(var_namespace) --from-env-file=$(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/${{ variables.environmentname }}env.properties -o yaml --dry-run=client  | kubectl apply --force -f -
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+  enabled: true
+
+#have the option to restart just one microservice
+- task: AzureCLI@2
+  displayName: 'Restarting POD ${{ parameters.environment }}${{ parameters.microservice }}service'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+     replicaCount=$(kubectl get pods --selector=app=${{ variables.environmentname }}-deploy-${{ parameters.microservice }}service -n $(var_namespace) | wc -l)
+     replicaCount=$(($replicaCount-1))
+     echo "The Replica Count is: $replicaCount"
+     echo Restarting eycomplyapp-${{ variables.environmentname }}-deploy-${{ parameters.microservice }}service in namespace $(var_namespace)
+     kubectl rollout restart deployment eycomplyapp-${{ variables.environmentname }}-deploy-${{ parameters.microservice }}service -n $(var_namespace)
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+  enabled: ${{ parameters.restart }}
+
+
+# Option to restart all of the microservices starting with configserver (and wait 60 seconds) before restart all the other ones. (new AzureCLI task) --- DONE
+- task: AzureCLI@2
+  displayName: 'Restarting all PODS in ${{ parameters.environment }}'
+  inputs:
+    azureSubscription: $(${{ parameters.environment }}-sub)
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az aks get-credentials --admin -g $(${{ parameters.environment }}-rg) -n $(${{ parameters.environment }}-cluster)
+     echo 'Restarting config server service'
+     kubectl rollout restart deployment eycomplyapp-${{ variables.environmentname }}-deploy-configserverservice -n $(var_namespace)
+     echo 'Waiting 45 seconds' 
+     sleep 45   
+     #### 
+     checkAvailableReplicasCount=$(kubectl get deploy eycomplyapp-${{ variables.environmentname }}-deploy-configserverservice -n $(var_namespace) -o jsonpath="{.status.availableReplicas}")
+     # Retry Logic 
+     for retry in {1..3} 
+       do
+         if [[ $checkAvailableReplicasCount -lt 1 ]]; then
+           echo Replica Count for configserverservice is less than 1. Waiting for another 45 seconds. 
+           sleep 45
+           else 
+           echo Replica Count is more than one for configserverservice
+           break
+         fi
+       done  
+      
+     if [[ $checkAvailableReplicasCount -lt 1 ]]; then
+       echo Service eycomplyapp-${{ variables.environmentname }}-deploy-configserverservice still have zero replicas
+     fi
+     #restart the rest of the microservices except configserver with for cycle
+     deployment_array=$(kubectl get deploy --no-headers -o custom-columns=":metadata.name" --namespace $(var_namespace) | grep ${{ variables.environmentname }})
+     deployment_array=$(sed 's%eycomplyapp-%%g' <<< "$deployment_array")
+     for deployment in ${deployment_array}
+       do
+         replicaCount=$(kubectl get pods --selector=app=$deployment -n $(var_namespace) | wc -l)
+         replicaCount=$(($replicaCount-1))
+         echo $deployment has $(($replicaCount+1)) pods
+         if [[ $deployment != *configserverservice && $replicaCount -gt 0 ]]; then         
+           echo Restarting $deployment in namespace $(var_namespace)
+           kubectl rollout restart deployment eycomplyapp-$deployment -n $(var_namespace)
+           sleep 60
+         else
+           echo eycomplyapp-$deployment has 0 replicas, nothing to do.
+         fi
+       done
+    addSpnToEnvironment: true
+    useGlobalConfig: true
+  enabled: ${{ parameters.applyall }}
+
+- script: |
+    az pipelines runs tag add --organization $(System.TeamFoundationCollectionUri) --project $(System.TeamProjectId) --run-id $(Build.BuildId) --tag "Environment: ${{ parameters.environment }}, Service: ${{ parameters.microservice }}service, App Restart Done: ${{ parameters.restart }}, Queued By: $(Build.QueuedBy)"
+  displayName: 'Tag pipeline run'
+  env:
+    AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+  condition: succeededOrFailed()
+
+
+#"$(${{ parameters.environment }}-cluster)" - This is the akscluster
+#"$(${{ parameters.environment }}-rg)" - This is Resource group
+#"$(${{ parameters.environment }}-sub)" - This is subscription
+#"$(${{ parameters.environment }}--sqlmipwd)" - This is sql mi password
+
+
+#--------------------------------------------------------------------------------------------------------

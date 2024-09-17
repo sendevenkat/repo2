@@ -1,0 +1,150 @@
+parameters:
+- name: environment
+  type: string
+- name: branch_artifact_selector
+  type: string
+- name: branch_artifact_value
+  type: string
+- name: version
+  type: string
+- name: adoEnv
+  type: string
+
+jobs:
+- deployment: Deploy
+  environment: "EY Comply.${{ parameters.adoEnv }}"
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        - script: |
+            echo "##vso[task.setvariable variable=BRANCH_ARTIFACT_VALUE_PARSED]$(echo ${{ parameters.branch_artifact_value }} |tr -cd '[:print:]' |tr -d '[[:blank:]]')"
+          displayName: 'Cleanup input string'
+
+        - script: |
+            echo "##vso[task.setvariable variable=MEMORY_REQUEST]"1Gi""
+            echo "##vso[task.setvariable variable=MEMORY_LIMIT]"10Gi""
+            echo "##vso[task.setvariable variable=CPU_REQUEST]"400m""
+            echo "##vso[task.setvariable variable=MAX_REPLICAS]"3""
+            echo "##vso[task.setvariable variable=MIN_REPLICAS]"1""
+            echo "##vso[task.setvariable variable=MEMORY_AUTOSCALE]"12Gi""
+          displayName: 'Set manifests variables'
+
+        - script: |
+            AKS_LB_PARSED=$(echo "$(AKS_LB)" | tr '[A-Z]' '[a-z]')
+            echo "##vso[task.setvariable variable=AKS_LB_PARSED]$AKS_LB_PARSED"
+          displayName: 'Set AKS load balancer variable'
+
+        - script: |
+            #INGRESS_PATH='$(PORTAL)(/|$)($(tenant-ingress-pattern))?(/|$)?($())(/|$)?(.*)'
+            INGRESS_PATH='/($(tenant-ingress-pattern)|$(PORTAL))?/?($(tenant-ingress-pattern)|$(PORTAL))(/|$)()(/|$)?(.*)'
+            echo '##vso[task.setvariable variable=INGRESS_PATH]'$INGRESS_PATH''
+          displayName: 'Set INGRESS_PATH variable MT'
+          enabled: true
+          condition: and(succeeded(), ne('${{ parameters.environment }}', 'qabcm'))
+
+        - script: |
+            #INGRESS_PATH='bcmdemo|$(PORTAL)(/|$)($(tenant-ingress-pattern)|bcmdemo)?(/|$)?($())(/|$)?(.*)'
+            INGRESS_PATH='/($(tenant-ingress-pattern)|bcmdemo|$(PORTAL))?/?($(tenant-ingress-pattern)|bcmdemo|$(PORTAL))(/|$)()(/|$)?(.*)'
+            echo '##vso[task.setvariable variable=INGRESS_PATH]'$INGRESS_PATH''
+          displayName: 'Set INGRESS_PATH variable MT'
+          enabled: true
+          condition: and(succeeded(), eq('${{ parameters.environment }}', 'qabcm'))
+
+        - script: |
+            cd $(Build.SourcesDirectory)
+
+            echo "Replacing variables in manifest files..."
+
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PORTAL}}|$(PORTAL)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{MICROSVC}}|$(MICROSVC)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{DOCKER_IMAGE_PATH}}|$(DOCKER_IMAGE_PATH)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{BUILD_VAR}}|$(BUILD_VAR)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./kubernetes/02-service.yml
+            sed -i "s|{{DOCKER_PORT}}|$(DOCKER_PORT)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s#{{INGRESS_REWRITE}}#$(INGRESS_REWRITE)#g" ./kubernetes/03-ingress-object.yml
+            sed -i "s#{{INGRESS_PATH}}#$(INGRESS_PATH)#g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PROXY_TIMEOUT}}|$(PROXY_TIMEOUT)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{AKS_LB}}|$(AKS_LB_PARSED)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{PROXY_BODY_SIZE}}|$(PROXY_BODY_SIZE)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{LIMIT_CONNECTIONS}}|$(LIMIT_CONNECTIONS)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{LIMIT_RPM}}|$(LIMIT_RPM)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{LIMIT_RPS}}|$(LIMIT_RPS)|g" ./kubernetes/03-ingress-object.yml
+            sed -i "s|{{MEMORY_LIMIT}}|$(MEMORY_LIMIT)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MEMORY_REQUEST}}|$(MEMORY_REQUEST)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{CPU_REQUEST}}|$(CPU_REQUEST)|g" ./kubernetes/01-deployment.yml
+            sed -i "s|{{MIN_REPLICAS}}|$(MIN_REPLICAS)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MAX_REPLICAS}}|$(MAX_REPLICAS)|g" ./kubernetes/04-hpa.yml
+            sed -i "s|{{MEMORY_AUTOSCALE}}|$(MEMORY_AUTOSCALE)|g" ./kubernetes/04-hpa.yml
+
+            cat ./kubernetes/01-deployment.yml
+            cat ./kubernetes/02-service.yml
+            cat ./kubernetes/03-ingress-object.yml
+            cat ./kubernetes/04-hpa.yml
+          displayName: 'Replace values in manifest files'
+
+        - task: Kubernetes@1
+          displayName: 'Deploy microservice'
+          inputs:
+            command: 'apply'
+            namespace: '${{ parameters.adoEnv }}'
+            arguments: '-f kubernetes/01-deployment.yml -f kubernetes/02-service.yml -f kubernetes/03-ingress-object.yml -f kubernetes/04-hpa.yml'
+            output: 'yaml'
+
+        - script: |
+            az pipelines runs tag add --organization $(System.TeamFoundationCollectionUri) --project $(System.TeamProjectId) --run-id $(Build.BuildId) --tag "Environment: $(PORTAL), Service: $(MICROSVC), DeployedFrom: ${{ parameters.branch_artifact_selector }}, SourceVersion: $(BRANCH_ARTIFACT_VALUE_PARSED), Queued By: $(Build.QueuedBy)" --detect true
+          displayName: 'Tag pipeline run'
+          env:
+            AZURE_DEVOPS_EXT_PAT: $(System.AccessToken)
+          condition: succeededOrFailed()
+
+        - script: |
+            echo PORTAL is $(PORTAL)
+            echo MICROSVC is $(MICROSVC)
+            echo BUILD_VAR is $(BUILD_VAR)
+            echo DOCKER_PORT is $(DOCKER_PORT)
+            echo INGRESS_REWRITE is '$(INGRESS_REWRITE)'
+            echo INGRESS_PATH is '$(INGRESS_PATH)'
+            echo PROXY_TIMEOUT is $(PROXY_TIMEOUT)
+            echo AKS_LB is $(AKS_LB)
+            echo MEMORY_REQUEST is $(MEMORY_REQUEST)
+            echo MEMORY_LIMIT is $(MEMORY_LIMIT)
+            echo CPU_REQUEST is $(CPU_REQUEST)
+            echo MAX_REPLICAS is $(MAX_REPLICAS)
+            echo MIN_REPLICAS is $(MIN_REPLICAS)
+            echo PROXY_BODY_SIZE is $(PROXY_BODY_SIZE)
+          displayName: 'Display variables'
+          condition: succeededOrFailed()
+
+        - task: PowerShell@2
+          inputs:
+            targetType: inline
+            script: |
+              Install-Module -Name PnP.PowerShell -Force -Verbose -Scope CurrentUser
+              #Site collection URL
+              $SiteURL = "https://sites.ey.com/teams/EYComply-DEV"
+              $Time = Get-Date -UFormat "%R" | ForEach-Object { $_ -replace ":", "" }
+              $Year = Get-Date -UFormat "%Y"
+              $Month = Get-Date -UFormat "%m"
+              $Date = Get-Date -UFormat "%d"
+              $ArtifactVersion=Get-Content /home/vsts/work/1/artifact/ARTIFACT_VERSION.var
+              $FileName = "${{parameters.environment}}"+"-"+"ui"+"-"+$Year+$Month+$Date+"-"+${Time}+"-"+"utc"+"-version-"+$ArtifactVersion+".txt"
+              #Connect to SharePoint Online with AppId and AppSecret
+              Connect-PnPOnline -Url $SiteURL -ClientId "869db586-4290-4cab-90d1-9f66f1213981" -ClientSecret "YzFkZjNjYzEtMDBkZS00MGYwLWI1NzEtYWQ1YzkzY2VkMDgw"
+              #Relative Path of the Library
+              $DestinationPath = "Releases/"
+              $SourceFilePath ="/home/vsts/work/1/artifact/environment.var"
+              Rename-Item -Path $SourceFilePath -NewName $FileName
+              $SourceFilePath ="/home/vsts/work/1/artifact/"+$FileName
+              #Upload File to SharePoint Online Library
+              Add-PnPFile -Path $SourceFilePath -Folder $DestinationPath
+          displayName: 'Release Notes Upload to Sharepoint'
+          enabled: true

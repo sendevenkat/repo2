@@ -1,0 +1,235 @@
+parameters:
+- name: serviceConnection
+  type: string
+- name: environment
+  type: string
+- name: owner
+  type: string
+- name: location
+  type: string
+- name: resourceGroupName
+  type: string
+- name: nonIpamVnet
+  type: string
+- name: nonIpamVnetName
+  type: string
+- name: nonIpamVnetAddressSpace
+  type: string
+- name: nonIpamSubnet
+  type: string
+- name: nonIpamSubnetAddressSpace
+  type: string
+- name: virtualNetwork
+  type: boolean
+- name: ipamLocation
+  type: string
+- name: ipRangeRegion
+  type: string
+- name: vnetAddressSpace
+  type: string
+- name: subnet
+  type: boolean
+- name: subnetSize
+  type: string
+
+jobs:
+- deployment: Provisioning
+  environment: Infrastructure
+  timeoutInMinutes: 0
+  strategy:
+    runOnce:
+      deploy:
+        steps:
+        - checkout: self
+
+        #Set var_owner
+        - bash: |
+            echo "##vso[task.setvariable variable=var_owner]${{ parameters.owner }};Rob.Marino@ey.com"
+          displayName: Set var_owner
+
+        #Save Resource Group Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_resourceGroupName]"${{ parameters.resourceGroupName }}""
+          displayName: Set RSG name
+
+        #Create Non-Routable Virtual Network
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatevirtualnetworkV211@1
+            customCondition: eq(${{ parameters.nonIpamVnet }}, true)
+            displayName: Deploy Virtual Network
+            name: VNET2
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_rolePurpose: "Virtual Network"
+              var_virtualNetworkAddressSpace: "${{ parameters.nonIpamVnetAddressSpace }}"
+
+        #Save Virtual Network Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_nonIpamVnetName]"${{ parameters.nonIpamVnetName }}""
+          condition: eq(${{ parameters.nonIpamVnet }}, false)
+          displayName: Set virtual network name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_nonIpamVnetName]"$(VNET2.name)""
+          condition: eq(${{ parameters.nonIpamVnet }}, true)
+          displayName: Set virtual network name
+
+        #Set Virtual Network Resource ID
+        - bash: |
+            echo "##vso[task.setvariable variable=var_nonIpamVnetResourceId]"/subscriptions/$(var_azure_rm_subid)/resourceGroups/$(var_resourceGroupName)/providers/Microsoft.Network/virtualNetwork/$(var_nonIpamVnetName)""
+          condition: eq(${{ parameters.nonIpamVnet }}, false)
+          displayName: Set virtual network resource ID
+        - bash: |
+            echo "##vso[task.setvariable variable=var_nonIpamVnetResourceId]"$(VNET2.id)""
+          condition: eq(${{ parameters.nonIpamVnet }}, true)
+          displayName: Set virtual network resource ID
+
+        #Create Subnet
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatesubnetV210@1
+            customCondition: and(succeeded(), eq(${{ parameters.nonIpamSubnet }}, true))
+            displayName: Deploy Subnet
+            name: SUBNET2
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_subnetAddressSpace: "${{ parameters.nonIpamSubnetAddressSpace }}"
+              var_virtualNetworkResourceId: "$(var_nonIpamVnetResourceId)"
+
+        #Save subnet Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_nonIpamSubnetName]"$(SUBNET2.name)""
+          condition: eq(${{ parameters.nonIpamSubnet }}, true)
+          displayName: Set subnet name
+
+        #Create IP range name for Virtual Network
+        - task: PowerShell@2
+          displayName: Generate IP range name
+          condition: eq(${{ parameters.virtualNetwork }}, true)
+          inputs:
+            filePath: 'scripts/Generate-Name.ps1'
+            arguments: '-resource "IP Range" -variableName "var_ipRangeName" -environment "${{ parameters.environment }}" -region "${{ parameters.location }}" -project_name "$(var_projectName)" -spnID $env:SPN_ID -spnSecret $env:SPN_SECRET'
+          env:
+            SPN_ID: "$(VAR_SPN_ID)"
+            SPN_SECRET: "$(VAR_SPN_SECRET)"
+
+        #Set var_vnetRequiredIps
+        - bash: |
+            if [ ${{ parameters.vnetAddressSpace }} == "/24" ]; then
+              echo "##vso[task.setvariable variable=var_vnetRequiredIps]"256""
+            elif [ ${{ parameters.vnetAddressSpace }} == "/25" ]; then
+              echo "##vso[task.setvariable variable=var_vnetRequiredIps]"128""
+            elif [ ${{ parameters.vnetAddressSpace }} == "/26" ]; then
+              echo "##vso[task.setvariable variable=var_vnetRequiredIps]"64""
+            elif [ ${{ parameters.vnetAddressSpace }} == "/27" ]; then
+              echo "##vso[task.setvariable variable=var_vnetRequiredIps]"32""
+            fi
+          condition: and(succeeded(),eq(${{ parameters.virtualNetwork }}, true))
+          displayName: Set required IPs for vnet
+
+        #Create IP Range for Virtual Network
+        - task: prodbbipam@0
+          displayName: Create IP Range
+          condition: and(succeeded(),eq(${{ parameters.virtualNetwork }}, true))
+          inputs:
+            azureConnection: "${{ parameters.serviceConnection }}"
+            organization: "$(var_ipamOrganization)"
+            ipRangeName: "$(var_ipRangeName)"
+            region: "${{ parameters.ipRangeRegion }}"
+            numberOfIp: "$(var_vnetRequiredIps)"
+
+        #Create Routable Virtual Network
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatevirtualnetworkV211@1
+            customCondition: and(succeeded(),eq(${{ parameters.virtualNetwork }}, true))
+            displayName: Deploy Virtual Network
+            name: VNET1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_rolePurpose: "Virtual Network"
+              var_numberOfIps: "$(var_vnetRequiredIps)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_ipamLocation: "${{ parameters.ipamLocation }}"
+              var_ipRangeName: "$(var_ipRangeName)"
+
+        #Save Virtual Network Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_virtualNetworkName]"$(VNET1.name)""
+          condition: eq(${{ parameters.virtualNetwork }}, true)
+          displayName: Set virtual network name
+
+        #Add tag to identify IP range used
+        - task: AzureCLI@2
+          displayName: Tag Vnet
+          condition: and(succeeded(), eq(${{ parameters.virtualNetwork }}, true))
+          inputs:
+            azureSubscription: "${{ parameters.serviceConnection }}"
+            scriptType: bash
+            scriptLocation: inlineScript
+            inlineScript: |
+              MSYS_NO_PATHCONV=1 az tag update --resource-id "$(VNET1.id)" --operation merge --tags IP_RANGE=$(var_ipRangeName)
+          continueOnError: true
+
+        #Set var_subnetRequiredIps
+        - bash: |
+            if [ ${{ parameters.subnetSize }} == "/24" ]; then
+              echo "##vso[task.setvariable variable=var_subnetRequiredIps]"244""
+            elif [ ${{ parameters.subnetSize }} == "/25" ]; then
+              echo "##vso[task.setvariable variable=var_subnetRequiredIps]"110""
+            elif [ ${{ parameters.subnetSize }} == "/26" ]; then
+              echo "##vso[task.setvariable variable=var_subnetRequiredIps]"45""
+            elif [ ${{ parameters.subnetSize }} == "/27" ]; then
+              echo "##vso[task.setvariable variable=var_subnetRequiredIps]"15""
+            fi
+          condition: eq(${{ parameters.subnet }}, true)
+          displayName: Set required IPs for subnet
+
+        #Create Routable Subnet
+        - template: launch-bb.yml
+          parameters:
+            taskName: prodbbcreatesubnetV210@1
+            customCondition: and(succeeded(),eq(${{ parameters.subnet }}, true))
+            displayName: Deploy Subnet
+            name: SUBNET1
+            location: "${{ parameters.location }}"
+            environment: "${{ parameters.environment }}"
+            serviceConnection: "${{ parameters.serviceConnection }}"
+            inputs:
+              var_resourceGroupName: "$(var_resourceGroupName)"
+              var_requiredIps: "$(var_subnetRequiredIps)"
+              var_ipamOrganization: "$(var_ipamOrganization)"
+              var_ipamLocation: "${{ parameters.ipamLocation }}"
+
+        #Save subnet Name
+        - bash: |
+            echo "##vso[task.setvariable variable=var_subnetName]"$(SUBNET1.name)""
+          condition: eq(${{ parameters.subnet }}, true)
+          displayName: Set subnet name
+
+        #Display variables
+        - script: |
+            echo --------General Variables------------------
+            echo var_owner is: $(var_owner)
+            echo var_resourceGroupName is: $(var_resourceGroupName)
+            echo --------Non-Routable Vnet Variables--------
+            echo var_nonIpamVnetName is: $(var_nonIpamVnetName)
+            echo var_nonIpamVnetResourceId is: $(var_nonIpamVnetResourceId)
+            echo var_nonIpamSubnetName is: $(var_nonIpamSubnetName)
+            echo -------Routable Vnet Variables-------------
+            echo var_ipRangeName is: $(var_ipRangeName)
+            echo var_vnetRequiredIps is: $(var_vnetRequiredIps)
+            echo var_virtualNetworkName is: $(var_virtualNetworkName)
+            echo var_subnetRequiredIps is: $(var_subnetRequiredIps)
+            echo var_subnetName is: $(var_subnetName)
+          displayName: 'Display variables'
+          condition: succeededOrFailed()

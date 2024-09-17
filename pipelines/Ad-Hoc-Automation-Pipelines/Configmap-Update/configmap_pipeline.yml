@@ -1,0 +1,267 @@
+resources:
+  repositories:
+  - repository: eyc-cm-nonprod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-nonprod
+  - repository: eyc-cm-prod
+    type: github
+    endpoint: emu-service-connection
+    name: ey-org/eyc-cm-prod
+
+trigger: none
+pr: none
+pool:
+  vmImage: 'ubuntu-latest'
+
+parameters:
+- name: environment
+  displayName: "Environment"
+  type: string
+  default: qa33
+  values:
+  - qa33
+  - qa36
+  - qa37
+  - perftest
+  - qabcm
+  - uat
+  - prod
+  - prod-dr
+
+- name: update_or_add
+  displayName: "Update or Add?"
+  type: string
+  default: update
+  values:
+  - update
+  - add
+
+- name: configmap_properties
+  displayName: "Configmap Properties"
+  type: object
+  default:
+  - key=value
+
+- name: restart_configmap
+  displayName: "Restart Service?"
+  type: boolean
+  default: false
+
+- name: microservice
+  displayName: "Microservice"
+  type: string
+  default: authorization
+  values:
+  - audit
+  - auditui
+  - authentication
+  - authorization
+  - bcmregreporting
+  - boardreporting
+  - clamav
+  - collaboration
+  - comments
+  - configuration
+  - configserver
+  - dataprovider
+  - discovery
+  - dlqprocessor
+  - dlqprocessorui
+  - dmsdataintake
+  - document
+  - download
+  - expensereporting
+  - finreport
+  - frpdfextraction
+  - gateway
+  - logging
+  - metadata
+  - notificationengine
+  - notificationclient
+  - notifieragent
+  - outboundgateway
+  - pbireport
+  - persistorstub
+  - rrcollaboration
+  - regreporting
+  - sbadmin
+  - sendoutengine
+  - standardizergateway
+  - taxreporting
+  - topsides
+  - tracker
+  - trackerui
+  - camundawrapper
+  - zipkin
+  - zipkinui
+
+# Parameters for pushing the secrets to the Key Vault
+- name: push_to_keyvault
+  displayName: "Push to KeyVault?"
+  type: boolean
+  default: false
+
+- name: secret_name_value
+  displayName: "Provide the Secret Name and Value(Example: - name-1=value. You can add multiple values by using -. Don't use anything else other than - for separation.)"
+  type: object
+  default: 
+  - name-1=value
+  - name-2=value2
+
+variables:
+  - template: ../../../variables/resource-groups.yml
+  - template: ../../../variables/subscriptions.yml
+  - template: ../../../variables/repos.yml
+  - name: keyvaultname
+    ${{ if eq(parameters['environment'], 'qa33') }}:
+      value: 'USEDEYC003AKV08'
+    ${{ if eq(parameters['environment'], 'qa36') }}:
+      value: 'USEDEYC003AKV09'
+    ${{ if eq(parameters['environment'], 'qa37') }}:
+      value: 'USEDEYC003AKV0A'
+    ${{ if eq(parameters['environment'], 'qabcm') }}:
+      value: 'USEDEYC003AKV0D'
+    ${{ if eq(parameters['environment'], 'perftest') }}:
+      value: 'USEDEYC003AKV0B'
+
+stages:
+- stage: UpdateConfigmap
+  displayName: 'Update ${{ parameters.environment }}env.properties Configmap'
+  pool:
+      vmImage: 'ubuntu-latest'
+  jobs:
+  - deployment: UpdateConfigmap
+    environment: "Configmap-Update-Pipeline"
+    timeoutInMinutes: 0
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: self
+            persistCredentials: true
+          - checkout: eyc-cm-nonprod
+            persistCredentials: true
+          - checkout: eyc-cm-prod
+
+          # Set the python version
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: '3.x'
+              addToPath: true
+              architecture: 'x64'
+            displayName: 'Python Version Setup'
+
+          - script: 
+              python -m pip install --upgrade pip setuptools wheel ruamel.yaml
+            displayName: 'Install Python Packages'
+
+          # Task to update the configmap properties
+          - ${{ each property in parameters.configmap_properties }}:
+            - task: PythonScript@0
+              inputs:
+                scriptSource: 'filePath'
+                scriptPath: eycomply-base/pipelines/Ad-Hoc-Automation-Pipelines/Configmap-Update/configmap.py
+                arguments: '--property ${{ property }} --environment ${{ parameters.environment }} --update_or_add ${{ parameters.update_or_add }} --repo $(${{ parameters.environment }}-repo)'
+              displayName: 'Update Configmap Properties'
+
+          # Migrate Secrets to Key Vault
+          - ${{ each key_value in parameters.secret_name_value }}:
+            - task: AzureCLI@2
+              inputs:
+                azureSubscription: '$(${{ parameters.environment }}-sub)'
+                scriptType: 'bash'
+                scriptLocation: inlineScript
+                inlineScript: |
+                  echo "Setting the secret ${{ key_value }} in the Key Vault"
+                  IFS="=" read -r name value <<< "${{ key_value }}"
+                  az keyvault secret set --vault-name $(keyvaultname) --name $name --value $value
+              displayName: 'Put Values in the Key Vault'
+              condition: and(succeeded(), eq('${{ parameters.push_to_keyvault }}', true))
+            # add sed command to replace the key vault values
+            - task: PythonScript@0
+              inputs:
+                scriptSource: 'filePath'
+                scriptPath: eycomply-base/pipelines/Ad-Hoc-Automation-Pipelines/Configmap-Update/pipeline-update.py
+                arguments: '--key_value ${{ key_value }}'
+              displayName: 'Update Configmap Pipeline'  
+              condition: and(succeeded(), eq('${{ parameters.push_to_keyvault }}', true))
+
+          # Push the changes to the git repository
+          - script: |
+              git config --global user.email EYCOMPLY@ey.com & git config --global user.name "EYComply"
+            displayName: 'Set Git Credentials'
+
+          - task: Bash@3
+            inputs:
+              targetType: 'inline'
+              script: |
+                cd "$(Build.SourcesDirectory)/$(${{ parameters.environment }}-repo)/"
+                git config --list
+                # Fetch changes from remote
+                git fetch
+
+                # Check if the master branch exists locally
+                if ! git show-ref --verify --quiet refs/heads/master; then
+                  # If not, create it from origin/master
+                  git checkout -b master origin/master
+                fi
+
+                # Pull changes from master
+                git pull origin master
+
+                # Check if there are changes before committing
+                if git status --porcelain | grep .; then
+                  git add .
+                  git commit -m "New properties added in non-prod configmap"
+                  git push --set-upstream origin master
+                else
+                  echo "No changes to commit."
+                fi
+
+                cd "$(Build.SourcesDirectory)/eycomply-base/"
+                git config --list
+
+                # Fetch changes from remote
+                git fetch
+
+                # Check if the master branch exists locally
+                if git show-ref --verify --quiet refs/heads/master; then
+                  # If it exists, switch to it and pull changes
+                  git checkout master
+                  git pull origin master
+                else
+                  # If it doesn't exist, create it from master or another valid starting point
+                  git checkout -b master origin/master
+                fi
+
+                # Check if there are changes before committing
+                git add .
+                git commit -m "New sed added for key vault values replacement"
+                git push --set-upstream origin master
+                echo 
+            displayName: 'Push to Git'
+
+          # Trigger the Configmap pipeline for restart
+          - task: TriggerBuild@3
+            displayName: 'Deploy Configmap'
+            inputs:
+              definitionIsInCurrentTeamProject: true
+              buildDefinition: 'EYC2-Deploy-ConfigMap'
+              queueBuildForUserThatTriggeredBuild: true
+              ignoreSslCertificateErrors: false
+              useSameSourceVersion: false
+              useCustomSourceVersion: false
+              useSameBranch: true
+              waitForQueuedBuildsToFinish: true
+              storeInEnvironmentVariable: false
+              templateParameters: "environment: ${{ parameters.environment }}, microservice: ${{ parameters.microservice }}"
+              authenticationMethod: 'OAuth Token'
+              password: '$(System.AccessToken)'
+              enableBuildInQueueCondition: false
+              dependentOnSuccessfulBuildCondition: false
+              dependentOnFailedBuildCondition: false
+              checkbuildsoncurrentbranch: false
+              failTaskIfConditionsAreNotFulfilled: false
+            condition: and(succeeded(), not(in('${{ parameters.microservice }}', 'zipkin', 'zipkinui', 'clamav')))
+            enabled: ${{ parameters.restart_configmap }}

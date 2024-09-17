@@ -1,0 +1,23 @@
+resources:
+  repositories:
+  - repository: eycomply-base
+    name: ey-org/eycomply-base
+    endpoint: eycomply-devops-pipeline
+    type: github
+    ref: master
+
+variables:
+- template: pipelines/builds/templates/build-variables.yml@eycomply-base
+
+trigger: none
+pr:
+- develop
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- checkout: self
+  path: service-repository
+- checkout: eycomply-base
+- template: pipelines/builds/backend/build-artifact.yml@eycomply-base

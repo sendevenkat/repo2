@@ -1,0 +1,76 @@
+trigger: none
+pr: none
+
+schedules:
+- cron: "30 0 1,15 * *"
+  displayName: "Biweekly reset"
+  branches:
+    include:
+    - master
+  always: true
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+- name: fdList
+  type: object
+  default:
+  - fdName: USEDEYC003AFD01
+    rgName: USEDEYCEYCRSG01
+
+variables:
+  defaultIps: "199.52.12.87 145.62.65.11 199.49.15.40" #EYRC
+
+steps:
+- ${{ each frontdoor in parameters.fdList }}:
+  - task: AzureCLI@2
+    displayName: Reset IP whitelist
+    inputs:
+      azureSubscription: "EYC-Non-Prod-Subscription"
+      scriptType: "bash"
+      scriptLocation: "inlineScript"
+      inlineScript: |
+        #Install FD extension
+        az config set extension.use_dynamic_install=yes_without_prompt
+
+        #Delete existing rule
+        az network front-door waf-policy rule delete \
+        --name IpRestriction \
+        --policy-name ${{ frontdoor.fdName }}AZManagedRulesPolicy \
+        --resource-group ${{ frontdoor.rgName }}
+
+        #Recreate rule
+        az network front-door waf-policy rule create \
+        --action Block \
+        --name IpRestriction \
+        --policy-name ${{ frontdoor.fdName }}AZManagedRulesPolicy \
+        --priority 1 \
+        --resource-group ${{ frontdoor.rgName }} \
+        --rule-type MatchRule \
+        --disabled false \
+        --defer
+
+        #Create match condition with default IPs
+        az network front-door waf-policy rule match-condition add \
+        --match-variable RemoteAddr \
+        --operator IPMatch \
+        --values $(defaultIps) \
+        --negate true \
+        --name IpRestriction \
+        --resource-group ${{ frontdoor.rgName }} \
+        --policy-name ${{ frontdoor.fdName }}AZManagedRulesPolicy
+
+        #Display current whitelist
+        IPLIST="$(az network front-door waf-policy rule match-condition list \
+        --name IpRestriction \
+        --resource-group ${{ frontdoor.rgName }} \
+        --policy-name ${{ frontdoor.fdName }}AZManagedRulesPolicy \
+        --query "[0].matchValue" \
+        --output tsv)"
+
+        echo "Updated list of allowed IPs:"
+
+        for ip in ${IPLIST[@]}; do
+          echo $ip
+        done
