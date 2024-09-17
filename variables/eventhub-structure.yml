@@ -1,0 +1,85 @@
+# This file contains list of clients, eventhubs and consumer groups used for topics and consumer groups creation
+# Placeholder {{ENV}} will be replaced with environment name (dev, qa, uat, prod) during pipeline execution
+# To create all topics and consumer groups from list for new client - add new client to "clients" array
+# To add new topic / consumer group for existing client - add new object to particular array
+# Since ag2 client uses only small part of topics and consumer groups, it needs additional change in deploy-resources.yml task "Create EH ConsumerGroups" according the documentation.
+# For more details seee EYDX documentation: https://connect.eyfabric.ey.com/eydx/content/8283a27b-0b9a-418c-b80c-518865bc0ae5
+
+clients=(
+  "ag2" \
+  "gs" \
+  "pimco2" \
+  "trp")
+
+eventHubs=("audit_trail_request_service_input_{{ENV}}.gs" \
+"audit_trail_request_service_input_{{ENV}}.pimco2" \
+"audit_trail_request_service_input_{{ENV}}.trp" \
+"audit_trail_response_service_input_{{ENV}}.gs" \
+"audit_trail_response_service_input_{{ENV}}.pimco2" \
+"audit_trail_response_service_input_{{ENV}}.trp" \
+"audit_trail_service_input_{{ENV}}.ag2" \
+"audit_trail_service_input_{{ENV}}.gs" \
+"audit_trail_service_input_{{ENV}}.pimco2" \
+"audit_trail_service_input_{{ENV}}.trp" \
+"az_input_topic_{{ENV}}" \
+"br_data_provider_consumer_{{ENV}}" \
+"cs_comment_topic_ag2" \
+"cs_comment_topic_{{ENV}}" \
+"dlq_input_topic_{{ENV}}.ag2" \
+"dlq_input_topic_{{ENV}}.gs" \
+"dlq_input_topic_{{ENV}}.pimco2" \
+"dlq_input_topic_{{ENV}}.trp" \
+"logging_service_input_{{ENV}}.ag2" \
+"logging_service_input_{{ENV}}.gs" \
+"logging_service_input_{{ENV}}.pimco2" \
+"logging_service_input_{{ENV}}.trp" \
+"na_input_topic_{{ENV}}.ag2" \
+"na_input_topic_{{ENV}}.gs" \
+"na_input_topic_{{ENV}}.pimco2" \
+"na_input_topic_{{ENV}}.trp" \
+"ne_business_input_topic_{{ENV}}.gs" \
+"ne_business_input_topic_{{ENV}}.pimco2" \
+"ne_business_input_topic_{{ENV}}.trp" \
+"ne_retry_topic_{{ENV}}.gs" \
+"ne_retry_topic_{{ENV}}.pimco2" \
+"ne_retry_topic_{{ENV}}.trp" \
+"processing_reports_topic_{{ENV}}.gs" \
+"processing_reports_topic_{{ENV}}.pimco2" \
+"processing_reports_topic_{{ENV}}.trp" \
+"se_confirmation_topic_{{ENV}}.gs" \
+"se_confirmation_topic_{{ENV}}.pimco2" \
+"se_confirmation_topic_{{ENV}}.trp" \
+"se_input_topic_{{ENV}}.gs" \
+"se_input_topic_{{ENV}}.pimco2" \
+"se_input_topic_{{ENV}}.trp" \
+"soe_retry_topic_{{ENV}}.gs" \
+"soe_retry_topic_{{ENV}}.pimco2" \
+"soe_retry_topic_{{ENV}}.trp" \
+"trigger_event_topic_{{ENV}}.gs" \
+"trigger_event_topic_{{ENV}}.pimco2" \
+"trigger_event_topic_{{ENV}}.trp")
+
+consumerGroups=(
+"audit_trail_request_service_input_{{ENV}}" \
+"audit_trail_response_service_input_{{ENV}}" \
+"audit_trail_service_input_{{ENV}}" \
+"br_data_provider_{{ENV}}.gs" \
+"br_data_provider_{{ENV}}.pimco2" \
+"br_data_provider_{{ENV}}.trp" \
+"comments-consumer-brms-{{ENV}}" \
+"comments-consumer-dms-{{ENV}}" \
+"comments-consumer-erms-{{ENV}}" \
+"comments-consumer-frms-{{ENV}}" \
+"comments-consumer-rrms-{{ENV}}" \
+"comments-consumer-trms-{{ENV}}" \
+"tracker-consumer-{{ENV}}" \
+"dlq_input_topic_{{ENV}}" \
+"logging_service_input_{{ENV}}" \
+"na_input_topic_{{ENV}}" \
+"ne_business_input_topic_{{ENV}}" \
+"ne_retry_topic_{{ENV}}" \
+"processing_reports_topic_{{ENV}}" \
+"se_confirmation_topic_{{ENV}}" \
+"se_input_topic_{{ENV}}" \
+"soe_retry_topic_{{ENV}}" \
+"trigger_event_topic_{{ENV}}")

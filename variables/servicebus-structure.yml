@@ -1,0 +1,15 @@
+# This file contains list of servicebus queues used for disaster recovery environment creation
+
+serviceBusQueues=(
+  "eyclogprod" \
+  "eyclogprodgs" \
+  "eyclogprodpimco01" \
+  "eyclogprodtrp" \
+  "gs-complete-zipfile-input" \
+  "gs-ds-file-input" \
+  "pimco01-complete-zipfile-input" \
+  "pimco01-ds-file-input" \
+  "trp-complete-zipfile-input" \
+  "trp-ds-download-fail-retry" \
+  "trp-ds-file-input" \
+)

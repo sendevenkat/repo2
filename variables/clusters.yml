@@ -1,0 +1,17 @@
+variables:
+  dev-cluster: USEDEYC003AKS0A
+  perftest-cluster: USEDEYC003AKS0A
+  qa33-cluster: USEDEYC003AKS0A
+  qa36-cluster: USEDEYC003AKS0A
+  qa37-cluster: USEDEYC003AKS0A
+  qabcm-cluster: USEDEYC003AKS0A
+  prod-cluster: USEPEYC002AKS02
+  uat-cluster: USEUEYC002AKS02
+  prod-dr-cluster: UWUPEYC002AKS04
+  
+
+  ## Dev Variables for bitnami/kubectl image
+  DOCKERFILE_PATH: "baseimage/dockerfile.bitnami" 
+  IMAGE_SOURCE_TAG: "1.26.12"
+  IMAGE_TARGET_TAG: "bitnami-kubectl-$(IMAGE_SOURCE_TAG)"
+  DOCKER_IMAGE_PATH: "$(DOCKER_REGISTRY)/baseimage:$(IMAGE_TARGET_TAG)"

@@ -1,0 +1,82 @@
+parameters:
+- name: "qa33"
+  type: boolean
+
+- name: "qa36"
+  type: boolean
+
+- name: "qa37"
+  type: boolean
+
+- name: "qabcm"
+  type: boolean
+
+- name: "perftest"
+  type: boolean
+
+- name: "uat"
+  type: boolean
+
+- name: "production"
+  type: boolean
+
+
+
+variables:
+  # Local Paths
+  destinationFolder: "$(System.DefaultWorkingDirectory)/Config Maps"
+  configMapsZip: "$(destinationFolder)/Config Maps.zip"
+
+  # Development Subscription
+  developmentServiceConnection: EYComply Non-Prod
+  developmentSubscriptionId: 0c18f943-558e-4c40-9841-5d3346a32072
+
+  # Production Subscription
+  productionServiceConnection: EYComply Production
+  productionSubscriptionId: 3bfcd835-00e0-4612-b488-2d49c94517db
+
+  environments: >-
+    [ { 'name': 'qa33', 'value': '${{ parameters.qa33 }}' }, { 'name': 'qa36', 'value': '${{ parameters.qa36 }}' }, { 'name': 'qa37', 'value': '${{ parameters.qa37 }}' }, { 'name': 'qabcm', 'value': '${{ parameters.qabcm }}' }, { 'name': 'perftest', 'value': '${{ parameters.perftest }}' }, { 'name': 'uat', 'value': '${{ parameters.uat }}' }, { 'name': 'production', 'value': '${{ parameters.production }}' } ]
+
+  # QA33
+  qa33Repository: eyc-cm-nonprod
+  qa33FileName: qa33env.properties
+  qa33ResourceGroup: USEDEYC003RSG04
+  qa33KeyVault: USEDEYC003AKV08
+
+  # QA36
+  qa36Repository: eyc-cm-nonprod
+  qa36FileName: qa36env.properties
+  qa36ResourceGroup: USEDEYC003RSG04
+  qa36KeyVault: USEDEYC003AKV09
+
+  # QA37
+  qa37Repository: eyc-cm-nonprod
+  qa37FileName: qa37env.properties
+  qa37ResourceGroup: USEDEYC003RSG04
+  qa37KeyVault: USEDEYC003AKV0A
+
+  # QA BCM
+  qabcmRepository: eyc-cm-nonprod
+  qabcmFileName: qabcmenv.properties
+  qabcmResourceGroup: USEDEYC003RSG04
+  qabcmKeyVault: USEDEYC003AKV0D
+
+  # Perftest
+  perftestRepository: eyc-cm-nonprod
+  perftestFileName: perftestenv.properties
+  perftestResourceGroup: USEDEYC003RSG04
+  perftestKeyVault: USEDEYC003AKV0B
+
+  # UAT
+  uatRepository: eyc-cm-prod
+  uatFileName: uatenv.properties
+  uatServiceConnection: EYComply Production
+  uatResourceGroup: USEPEYC002RSG04
+  uatKeyVault: USEUEYC002AKV02
+
+  # Production
+  productionRepository: eyc-cm-prod
+  productionFileName: prodenv.properties
+  productionResourceGroup: USEPEYC002RSG04
+  productionKeyVault: USEPEYC002AKV07

@@ -1,0 +1,10 @@
+parameters:
+- name: microservice 
+  type: string
+
+variables:
+  ENV_CLASS: uat
+  ADO_ENV: uat
+  DOCKER_REGISTRY: "eyctpeu-eycomply-docker-uat-eu.jfrog.io"
+  DOCKER_REPO: "eycomply-docker-uat-eu"
+  DOCKER_IMAGE_PATH: "$(DOCKER_REGISTRY)/${{ parameters.microservice }}-service:$(BUILD_VAR)"

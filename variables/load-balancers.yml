@@ -1,0 +1,9 @@
+variables:
+  perftest-load-balancer: USEDEYC003AKS0A
+  qa33-load-balancer: USEDEYC003AKS0A
+  qa36-load-balancer: USEDEYC003AKS0A
+  qa37-load-balancer: USEDEYC003AKS0A
+  qabcm-load-balancer: USEDEYC003AKS0A
+  prod-load-balancer: USEPEYC002AKS02
+  uat-load-balancer: USEUEYC002AKS02
+  prod-dr-load-balancer: uwupeyc002aks04

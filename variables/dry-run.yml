@@ -1,0 +1,9 @@
+variables:
+  sourceResourceGroup: USEPEYC002RSG04
+  sourceSubscription: 3bfcd835-00e0-4612-b488-2d49c94517db
+  sourceManagedInstance: usepeyc002mis03prod
+  targetResourceGroup: USEPEYC002RSG04
+  targetSubscription: EY-CTSBP-PROD-ADVISORY-EY_Comply_PBI-01-20759916
+  targetManagedInstance: useueyc002mis01
+  targetKeyVault: USEPEYC002AKV07
+  targetDBServer: 'useueyc002mis01.public.cbdac4ecd1e7.database.windows.net,3342'

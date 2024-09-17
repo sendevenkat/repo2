@@ -1,0 +1,15 @@
+variables:
+  # dev-sub: EYC-Non-Prod-Subscription
+  # perftest-sub: EYC-Non-Prod-Subscription
+  # qa33-sub: EYC-Non-Prod-Subscription
+  # qa36-sub: EYC-Non-Prod-Subscription
+  # qa37-sub: EYC-Non-Prod-Subscription
+  dev-sub: EYComply Non-Prod
+  perftest-sub: EYComply Non-Prod
+  qa33-sub: EYComply Non-Prod
+  qa36-sub: EYComply Non-Prod
+  qa37-sub: EYComply Non-Prod
+  qabcm-sub: EYComply Non-Prod
+  prod-sub: "EY Comply Prod"
+  uat-sub: "EY Comply Prod"
+  prod-dr-sub: "EY Comply Prod"

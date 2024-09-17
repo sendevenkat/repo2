@@ -1,0 +1,9 @@
+variables:
+  perftest-repo: eyc-cm-nonprod
+  qa33-repo: eyc-cm-nonprod
+  qa36-repo: eyc-cm-nonprod
+  qa37-repo: eyc-cm-nonprod
+  qabcm-repo: eyc-cm-nonprod
+  prod-repo: eyc-cm-prod
+  uat-repo: eyc-cm-prod
+  prod-dr-repo: eyc-cm-prod

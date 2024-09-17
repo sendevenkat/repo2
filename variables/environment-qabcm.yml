@@ -1,0 +1,12 @@
+parameters:
+- name: microservice 
+  type: string
+
+variables:
+  ENV_CLASS: dev
+  ADO_ENV: bcm
+  DOCKER_REGISTRY: "eyctpeu-eycomply-docker-dev-eu.jfrog.io"
+  DOCKER_REPO: "eycomply-docker-dev-eu"
+  DOCKER_IMAGE_PATH: "$(DOCKER_REGISTRY)/${{ parameters.microservice }}-service:$(BUILD_VAR)"
+  AKS_NAMESPACE: "fry9c"  #only for fry9c project
+  PORTAL: "qabcm"

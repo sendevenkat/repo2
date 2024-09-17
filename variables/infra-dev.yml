@@ -1,0 +1,43 @@
+variables:
+  credentials: 1237
+  var_omsResourceGroup: USEDEYC003RSG04
+  var_omsSubscriptionId: "0c18f943-558e-4c40-9841-5d3346a32072"
+  var_omsWorkspaceName: USEDEYC003LAW04
+  var_logAnalyticsResourceId: "/subscriptions/$(var_omsSubscriptionId)/resourcegroups/$(var_omsResourceGroup)/providers/microsoft.operationalinsights/workspaces/$(var_omsWorkspaceName)"
+  var_azure_rm_subid: "0c18f943-558e-4c40-9841-5d3346a32072"
+  var_tenantId: "5b973f99-77df-4beb-b27d-aa0c70b8482c"
+  var_chargeCode: "20823136"
+  var_deploymentId: "EYC003"
+  var_projectName: "003"
+  var_productApp: "EYComply"
+  var_ipamOrganization: "EYComplyNonProd"
+  var_ipamUrl: "https://apis.000ukso.sbp.eyclienthub.com/ipam"
+
+  #Secret vars (value defined in pipeline variables)
+  VAR_SPN_ID: 7ccf7633-c86c-4891-9bde-196e7145c984
+  VAR_SPN_SECRET: $(var_devSpnSecret)
+  VAR_AT_USER: P.EYComply.01
+  VAR_AT_SECRET: $(var_atSecret)
+
+  #KaaS values
+  var_billingProjectName: "Internal - EYComply BCM"
+  var_systemAgentPoolMaxCount: 30
+  var_systemAgentPoolMaxPods: 140
+  var_systemAgentPoolMinCount: 1
+  var_systemAgentPoolOsDiskSizeGB: 512
+  var_systemAgentPoolVmSize: Standard_E16ads_v5
+  var_availabilityZones: ""
+  var_acrId: "/subscriptions/0c18f943-558e-4c40-9841-5d3346a32072/resourceGroups/USEDEYCEYCRSG01/providers/Microsoft.ContainerRegistry/registries/eycomplynonprod"
+
+  #SQL MI Storage Account values
+  var_sqlmiStaKind: "Storage"
+  var_sqlmiStaSku: "Standard_LRS"
+
+  #SQL MI values
+  var_containerName: "vulnerability-assessment"
+  var_storageSizeInGB: 512
+  var_serverTier: "GeneralPurpose"
+  var_vCores: 8
+
+  #EventHub values
+  var_partitionCount: 5

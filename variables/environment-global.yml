@@ -1,0 +1,41 @@
+parameters:
+- name: environment 
+  type: string
+- name: microservice 
+  type: string
+
+# Global variables
+variables:
+  - name: DOCKER_BASE_IMAGE
+    value: "eyctpeu-eycomply-docker-dev-eu.jfrog.io/baseimage:alpine-azul-17.0.8-17.44.15-jre"
+  - name: DOCKER_PORT
+    value: "8080"
+  - name: MICROSVC
+    value: "${{ parameters.microservice }}service"
+  - name: BUILD_VAR
+    value: "$(Build.BuildNumber)"
+  - name: PROXY_TIMEOUT
+    value: "1800"
+  - name: PROXY_BODY_SIZE
+    value: "50m"
+  - name: LIMIT_CONNECTIONS
+    value: "500"
+  - name: LIMIT_RPM
+    value: "250"
+  - name: LIMIT_RPS
+    value: "25"
+  - name: AKS_LB
+    value: "$(${{ parameters.environment }}-load-balancer)"
+  - name: CATALINA_HOME
+    ${{ if eq(parameters.environment, 'prod-dr') }}:
+      value: "/opt/tomcat/tomcat_$(ENV_CLASS)"
+    ${{ else }}:
+      value: "/opt/tomcat/tomcat_${{ parameters.environment }}"
+  - name: PORTAL
+    ${{ if eq(parameters.environment, 'prod-dr') }}:
+      value: "prod"
+    ${{ else }}:
+      value: "${{ parameters.environment }}"
+  - name: VERSION
+    value: "demo"
+
