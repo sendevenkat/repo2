@@ -1,0 +1,10 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-manager-role
+  namespace: eycomply
+rules:
+- apiGroups: ["apps", "extensions"]
+  resources: ["deployments"]
+  resourceNames: ["eycomplyapp-qa33-deploy-camundawrapperservice"]
+  verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]

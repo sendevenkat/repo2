@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: camunda-wrapper-cronjob
+  namespace: uat
+spec:
+  concurrencyPolicy: Forbid
+  schedule: "0 7 * * 0"
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 600
+      template:
+        spec:
+          serviceAccountName: deployment-restart-uat
+          restartPolicy: OnFailure
+          containers:
+            - name: eycomplyapp-uat-camundawrapperservice
+              image: bitnami/kubectl:1.26.12
+              command:
+                - 'kubectl'
+                - 'rollout'
+                - 'restart'
+                - 'deployment/eycomplyapp-uat-deploy-camundawrapperservice'
+
+# Path: kubernetes/CronJobs/camunda-wrapper-cronjob-manifest.yml
+# 0 12 * * 0
+

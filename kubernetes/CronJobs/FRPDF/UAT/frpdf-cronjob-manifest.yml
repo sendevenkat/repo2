@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: frpdf-cronjob
+  namespace: uat
+spec:
+  concurrencyPolicy: Forbid
+  schedule: "0/10 * * * 1"
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 600
+      template:
+        spec:
+          serviceAccountName: deployment-cron-uat
+          restartPolicy: OnFailure
+          containers:
+            - name: eycomplyapp-uat-frpdfservice
+              image: bitnami/kubectl:1.26.12
+              command:
+                - "/bin/sh"
+                - "-c"
+                - "kubectl exec -it $(kubectl get pods -l app='uat-deploy-frpdfextractionservice' -o=jsonpath='{.items[0].metadata.name}' -n uat) -n uat -- /bin/sh -c 'python3 sftp_pdf_extraction.py'"
+
+# Path: kubernetes/CronJobs/camunda-wrapper-cronjob-manifest.yml
+# 0/5 * * * *
+
+#Error: failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: exec: "kubectl exec -it eycomplyapp-uat-deploy-frpdfextractionservice-5f67b75686-h4x4c -n uat -- python3 sftp_pdf_extraction.py": executable file not found in $PATH: unknown

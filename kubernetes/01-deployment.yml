@@ -1,0 +1,55 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eycomplyapp-{{PORTAL}}-deploy-{{MICROSVC}}
+spec:
+  selector:
+    matchLabels:
+      app: {{PORTAL}}-deploy-{{MICROSVC}}
+  template:
+    metadata:
+      labels:
+        app: {{PORTAL}}-deploy-{{MICROSVC}}
+        svc: {{MICROSVC}}
+        env: {{PORTAL}}
+        instance: {{PORTAL}}-{{MICROSVC}}
+    spec:
+      securityContext:
+        supplementalGroups: [4000]
+        fsGroup: 2000
+      containers:
+        - name: eycomplyapp-{{PORTAL}}-{{MICROSVC}}
+          image: {{DOCKER_IMAGE_PATH}}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+          resources:
+              limits:
+                memory: {{MEMORY_LIMIT}}
+              requests:
+                memory: {{MEMORY_REQUEST}}
+                cpu: {{CPU_REQUEST}}
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{PORTAL}}serviceconfig
+          readinessProbe:
+            tcpSocket:
+                port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+                port: 8080
+            initialDelaySeconds: 45
+            periodSeconds: 15
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+      imagePullSecrets:
+        - name: eycomply-jfrog-docker-registry
